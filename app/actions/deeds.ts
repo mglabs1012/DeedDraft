@@ -10,7 +10,9 @@ import {
   updateDeedTitleSchema,
   updateRemarksSchema,
 } from "@/lib/schemas/deeds";
+import { parseDeedData, updateDeedSectionSchema } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
+import type { Json } from "@/types/database";
 
 type ActionResult = { error?: string; id?: string };
 
@@ -211,5 +213,33 @@ export async function deleteDeed(input: unknown): Promise<ActionResult> {
 
   revalidatePath("/app/deeds");
   revalidatePath("/app/dashboard");
+  return {};
+}
+
+export async function updateDeedSection(input: unknown): Promise<ActionResult> {
+  const parsed = updateDeedSectionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid details." };
+
+  const { workspace, deed } = await findDeed(parsed.data.id);
+  if (!deed) return { error: "Deed not found." };
+
+  const data = { ...parseDeedData(deed.data), [parsed.data.section]: parsed.data.value };
+  const { error } = await workspace.supabase
+    .from("deeds")
+    .update({ data: data as unknown as Json })
+    .eq("id", deed.id);
+
+  if (error) return { error: error.message };
+
+  await workspace.supabase.from("activity_log").insert({
+    firm_id: workspace.firm.id,
+    deed_id: deed.id,
+    user_id: workspace.user.id,
+    action: "updated_" + parsed.data.section,
+    details: {},
+  });
+
+  revalidatePath("/app/deeds/" + deed.id);
+  revalidatePath("/app/deeds");
   return {};
 }

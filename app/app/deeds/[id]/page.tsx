@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { DeedDetail } from "@/components/deeds/deed-detail";
+import { parseDeedData } from "@/lib/schemas/deed-data";
 import { getCurrentWorkspace } from "@/lib/workspace";
 import type { Database, Deed } from "@/types/database";
 
@@ -20,5 +21,15 @@ export default async function DeedDetailPage({ params }: { params: Promise<{ id:
 
   if (!deedResult.data) notFound();
 
-  return <DeedDetail activities={(activityResult.data ?? []) as Activity[]} deed={deedResult.data as Deed} documents={(documentsResult.data ?? []) as Document[]} firmId={workspace.firm.id} />;
+  return (
+    <DeedDetail
+      activities={(activityResult.data ?? []) as Activity[]}
+      deed={deedResult.data as Deed}
+      documents={(documentsResult.data ?? []) as Document[]}
+      firmCity={workspace.firm.city}
+      firmId={workspace.firm.id}
+      firmName={workspace.firm.name}
+      initialData={parseDeedData(deedResult.data.data)}
+    />
+  );
 }

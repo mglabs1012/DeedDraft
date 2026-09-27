@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { updateProfileSchema } from "@/lib/schemas/deed-data";
 import { updateFirmSchema } from "@/lib/schemas/settings";
 import { requireWorkspace } from "@/lib/workspace";
 
@@ -34,5 +35,21 @@ export async function updateFirm(input: unknown) {
 
   revalidatePath("/app/settings");
   revalidatePath("/app/dashboard");
+  return {};
+}
+
+export async function updateProfile(input: unknown) {
+  const parsed = updateProfileSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
+
+  const workspace = await requireWorkspace();
+  const { error } = await workspace.supabase
+    .from("profiles")
+    .update({ full_name: parsed.data.fullName, phone: parsed.data.phone || null })
+    .eq("id", workspace.user.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/app", "layout");
   return {};
 }
