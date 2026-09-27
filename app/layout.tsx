@@ -12,7 +12,7 @@ const inter = localFont({
 
 const notoSansDevanagari = localFont({
   src: "../node_modules/@fontsource-variable/noto-sans-devanagari/files/noto-sans-devanagari-devanagari-wght-normal.woff2",
-  variable: "--font-devanagari",
+  variable: "--font-noto-devanagari",
   display: "swap",
   weight: "100 900",
 });

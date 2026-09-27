@@ -89,6 +89,17 @@ npm run lint
 npm run build
 \`\`\`
 
+## Troubleshooting: page shows no styling
+
+If pages render as plain unstyled HTML, the browser is loading a stylesheet from an older build. Stop every running `npm run dev` / `npm run start`, delete the build cache, and start again:
+
+\`\`\`powershell
+Remove-Item -Recurse -Force .next
+npm run dev
+\`\`\`
+
+Then hard-refresh the browser (Ctrl+Shift+R). Never run `npm run build` while `npm run start` is serving the same folder.
+
 ## Security model
 
 - Every firm-scoped table has Supabase RLS enabled.
