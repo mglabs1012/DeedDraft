@@ -1,7 +1,7 @@
 import { NewDeedForm } from "@/components/deeds/new-deed-form";
-import type { DeedType } from "@/lib/deeds";
+import { isDeedType } from "@/lib/deed-types";
 
-const validTypes = new Set(["sale", "release", "gift", "partition", "will", "other"]);
+export const metadata = { title: "New deed" };
 
 export default async function NewDeedPage({
   searchParams,
@@ -9,7 +9,7 @@ export default async function NewDeedPage({
   searchParams: Promise<{ type?: string }>;
 }) {
   const params = await searchParams;
-  const initialType = validTypes.has(params.type ?? "") ? (params.type as DeedType) : undefined;
+  const initialType = isDeedType(params.type) ? params.type : undefined;
 
   return (
     <div>

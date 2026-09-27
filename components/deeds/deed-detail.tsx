@@ -32,32 +32,46 @@ import {
   recategorizeDocument,
 } from "@/app/actions/documents";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
-import { PartiesSection, PaymentsSection, PropertiesSection, type SaveSection } from "@/components/deeds/deed-sections";
 import { DraftGenerator } from "@/components/deeds/draft-generator";
+import { PartiesSection } from "@/components/deeds/sections/parties";
+import { PaymentsSection } from "@/components/deeds/sections/payments";
+import { PropertiesSection } from "@/components/deeds/sections/properties";
+import type { SaveSection } from "@/components/deeds/sections/shared";
+import { TermsSection } from "@/components/deeds/sections/terms";
+import { TitleChainSection } from "@/components/deeds/sections/title-chain";
 import { Button } from "@/components/ui/button";
-import { getReadiness, paymentsTotal } from "@/lib/draft";
+import { getDeedType, sectionsFor, type SectionId } from "@/lib/deed-types";
 import {
   activityLabel,
   documentCategories,
   documentCategoryLabels,
   formatINR,
-  hasConsideration,
   languageLabels,
-  partyRoleLabels,
   statusLabels,
   type DocumentCategory,
   type DeedStatus,
 } from "@/lib/deeds";
+import { getReadiness, paymentsTotal } from "@/lib/drafting";
+import { displayName } from "@/lib/drafting/format";
 import type { DeedData } from "@/lib/schemas/deed-data";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, Deed } from "@/types/database";
 
 type Document = Database["public"]["Tables"]["deed_documents"]["Row"];
 type Activity = Database["public"]["Tables"]["activity_log"]["Row"];
-type Tab = "overview" | "documents" | "parties" | "properties" | "payments" | "remarks" | "generate";
+type Tab = "overview" | SectionId | "remarks" | "generate";
 type UploadItem = { id: string; file: File; category: DocumentCategory; status: "ready" | "uploading" | "complete" | "error" };
 
 const inputClass = "h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15";
+
+const sectionLabels: Record<SectionId, string> = {
+  parties: "Parties",
+  properties: "Property",
+  title: "Chain of title",
+  payments: "Consideration & payments",
+  terms: "Terms & execution",
+  documents: "Documents",
+};
 
 function EmptyPlaceholder({ title, description }: { title: string; description: string }) {
   return (
@@ -86,6 +100,7 @@ export function DeedDetail({
   firmCity: string;
   initialData: DeedData;
 }) {
+  const config = getDeedType(deed.deed_type);
   const [tab, setTab] = useState<Tab>("overview");
   const [title, setTitle] = useState(deed.title);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -94,34 +109,35 @@ export function DeedDetail({
   const [data, setData] = useState<DeedData>(initialData);
   const [savedState, setSavedState] = useState<"saved" | "saving" | "unsaved">("saved");
   const [pending, startTransition] = useTransition();
-  const hasMounted = useRef(false);
-  const roles = partyRoleLabels[deed.deed_type];
-  const withPayments = hasConsideration(deed.deed_type);
+  const savedRemarks = useRef(deed.remarks ?? "");
   const readiness = getReadiness(deed.deed_type, data, documents.length);
   const readyCount = readiness.filter((item) => item.done).length;
+  const counts: Partial<Record<SectionId, number>> = {
+    parties: data.parties.length,
+    properties: data.properties.length,
+    title: data.titleChain.length,
+    payments: data.payments.length,
+    documents: documents.length,
+  };
 
   const tabs: Array<{ id: Tab; label: string; count?: number }> = [
     { id: "overview", label: "Overview" },
-    { id: "parties", label: "Parties", count: data.parties.length },
-    { id: "properties", label: "Properties", count: data.properties.length },
-    ...(withPayments ? [{ id: "payments" as const, label: "Consideration & Payments", count: data.payments.length }] : []),
-    { id: "documents", label: "Documents", count: documents.length },
+    ...sectionsFor(deed.deed_type).map((section) => ({ id: section as Tab, label: sectionLabels[section], count: counts[section] })),
     { id: "remarks", label: "Remarks" },
     { id: "generate", label: "Generate draft" },
   ];
 
+  // Debounced autosave; compares with the last saved value so it never fires on mount.
   useEffect(() => {
-    if (!hasMounted.current) {
-      hasMounted.current = true;
-      return;
-    }
-    setSavedState("saving");
+    if (remarks === savedRemarks.current) return;
     const timer = window.setTimeout(() => {
+      setSavedState("saving");
       void updateRemarks({ id: deed.id, remarks }).then((result) => {
         if (result.error) {
           setSavedState("unsaved");
           toast.error(result.error);
         } else {
+          savedRemarks.current = remarks;
           setSavedState("saved");
         }
       });
@@ -170,11 +186,12 @@ export function DeedDetail({
     });
   };
 
-  const counts = documents.reduce<Record<string, number>>((all, document) => {
+  const docCounts = documents.reduce<Record<string, number>>((all, document) => {
     all[document.category] = (all[document.category] ?? 0) + 1;
     return all;
   }, {});
   const total = data.consideration.total ?? 0;
+  const names = (role: "first" | "second") => data.parties.filter((party) => party.role === role).map((party) => displayName(party, "hindi")).join(", ") || "—";
 
   return (
     <div className="space-y-6">
@@ -185,6 +202,7 @@ export function DeedDetail({
               <TypeBadge type={deed.deed_type} />
               <StatusBadge status={status} />
               <span className="font-mono text-xs font-semibold text-muted-foreground">{deed.reference_no}</span>
+              <span className="font-devanagari text-xs text-muted-foreground">{config.labelHi}</span>
             </div>
             <div className="mt-3 flex items-start gap-2">
               {editingTitle ? (
@@ -238,10 +256,11 @@ export function DeedDetail({
             <dl className="mt-4 space-y-3 text-sm">
               <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Reference</dt><dd className="font-mono font-semibold text-primary">{deed.reference_no}</dd></div>
               <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Draft language</dt><dd className="font-medium text-primary">{languageLabels[deed.language]}</dd></div>
-              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">{roles.first}</dt><dd className="truncate text-right font-medium text-primary">{data.parties.filter((party) => party.role === "first").map((party) => party.fullName).join(", ") || "—"}</dd></div>
-              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">{roles.second}</dt><dd className="truncate text-right font-medium text-primary">{data.parties.filter((party) => party.role === "second").map((party) => party.fullName).join(", ") || "—"}</dd></div>
-              {withPayments ? <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Consideration</dt><dd className="text-right font-semibold text-primary">{total ? formatINR(total) : "—"}{total ? <span className="block text-xs font-normal text-muted-foreground">{formatINR(paymentsTotal(data))} received</span> : null}</dd></div> : null}
-              <div><dt className="text-muted-foreground">Documents</dt><dd className="mt-2 flex flex-wrap gap-2">{Object.entries(counts).length ? Object.entries(counts).map(([category, count]) => <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground" key={category}>{documentCategoryLabels[category as DocumentCategory]} · {count}</span>) : <span className="text-sm text-muted-foreground">No documents uploaded.</span>}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="shrink-0 text-muted-foreground">{config.roles.first.en}</dt><dd className="min-w-0 truncate text-right font-medium text-primary">{names("first")}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="shrink-0 text-muted-foreground">{config.roles.second.en}</dt><dd className="min-w-0 truncate text-right font-medium text-primary">{names("second")}</dd></div>
+              {config.consideration !== "none" ? <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Consideration</dt><dd className="text-right font-semibold text-primary">{total ? formatINR(total) : "—"}{total ? <span className="block text-xs font-normal text-muted-foreground">{formatINR(paymentsTotal(data))} received</span> : null}</dd></div> : null}
+              {config.terms === "tenancy" ? <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Monthly rent</dt><dd className="text-right font-semibold text-primary">{data.terms.monthlyRent ? formatINR(data.terms.monthlyRent) : "—"}{data.terms.termMonths ? <span className="block text-xs font-normal text-muted-foreground">{data.terms.termMonths} months</span> : null}</dd></div> : null}
+              <div><dt className="text-muted-foreground">Documents</dt><dd className="mt-2 flex flex-wrap gap-2">{Object.entries(docCounts).length ? Object.entries(docCounts).map(([category, count]) => <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground" key={category}>{documentCategoryLabels[category as DocumentCategory] ?? category} · {count}</span>) : <span className="text-sm text-muted-foreground">No documents uploaded.</span>}</dd></div>
             </dl>
           </div>
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5 lg:col-span-2 xl:col-span-1">
@@ -250,12 +269,14 @@ export function DeedDetail({
           </div>
         </section>
       ) : null}
-      {tab === "documents" ? <DocumentsTab deedId={deed.id} documents={documents} firmId={firmId} /> : null}
       {tab === "parties" ? <PartiesSection deedType={deed.deed_type} parties={data.parties} save={saveSection} /> : null}
-      {tab === "properties" ? <PropertiesSection properties={data.properties} save={saveSection} /> : null}
-      {tab === "payments" ? <PaymentsSection consideration={data.consideration} payments={data.payments} save={saveSection} /> : null}
-      {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">These notes stay with the matter and guide drafting.</p></div><span className={"shrink-0 text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
-      {tab === "generate" ? <DraftGenerator city={firmCity} data={data} firmName={firmName} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      {tab === "properties" ? <PropertiesSection deedType={deed.deed_type} parties={data.parties} properties={data.properties} save={saveSection} /> : null}
+      {tab === "title" ? <TitleChainSection entries={data.titleChain} save={saveSection} /> : null}
+      {tab === "payments" ? <PaymentsSection consideration={data.consideration} deedType={deed.deed_type} payments={data.payments} save={saveSection} /> : null}
+      {tab === "terms" ? <TermsSection deedType={deed.deed_type} execution={data.execution} firmCity={firmCity} save={saveSection} terms={data.terms} /> : null}
+      {tab === "documents" ? <DocumentsTab deedId={deed.id} documents={documents} firmId={firmId} /> : null}
+      {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">Client instructions and drafting notes. These will also guide AI drafting later.</p></div><span className={"shrink-0 text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
+      {tab === "generate" ? <DraftGenerator city={firmCity} data={data} firmName={firmName} language={deed.language} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
     </div>
   );
 }

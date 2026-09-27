@@ -59,13 +59,14 @@ export type Database = {
       is_firm_member: { Args: { target_firm_id: string }; Returns: boolean };
       is_firm_owner: { Args: { target_firm_id: string }; Returns: boolean };
       shares_firm_with: { Args: { target_user_id: string }; Returns: boolean };
+      update_deed_section: { Args: { p_deed_id: string; p_section: string; p_value: Json }; Returns: string };
     };
     Enums: {
-      deed_type: "sale" | "release" | "gift" | "partition" | "will" | "other";
+      deed_type: "sale" | "agreement_to_sell" | "gift" | "release" | "partition" | "will" | "lease" | "rent" | "other";
       deed_status: "draft" | "data_collection" | "under_review" | "generated" | "finalized";
       deed_language: "english" | "hindi" | "bilingual";
       member_role: "owner" | "advocate" | "clerk";
-      document_category: "naksha_map" | "id_proof" | "prior_title_deed" | "jamabandi" | "payment_proof" | "photograph" | "other";
+      document_category: "naksha_map" | "id_proof" | "prior_title_deed" | "jamabandi" | "payment_proof" | "photograph" | "patta" | "loan_papers" | "stamp_paper" | "other";
     };
     CompositeTypes: Record<string, never>;
   };
