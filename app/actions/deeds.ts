@@ -218,18 +218,33 @@ export async function deleteDeed(input: unknown): Promise<ActionResult> {
 
 export async function updateDeedSection(input: unknown): Promise<ActionResult> {
   const parsed = updateDeedSectionSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid details." };
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const row = issue?.path.find((part) => typeof part === "number");
+    return { error: (typeof row === "number" ? "Item " + (row + 1) + ": " : "") + (issue?.message ?? "Invalid details.") };
+  }
 
   const { workspace, deed } = await findDeed(parsed.data.id);
   if (!deed) return { error: "Deed not found." };
 
-  const data = { ...parseDeedData(deed.data), [parsed.data.section]: parsed.data.value };
-  const { error } = await workspace.supabase
-    .from("deeds")
-    .update({ data: data as unknown as Json })
-    .eq("id", deed.id);
+  // Atomic per-section update (migration 0003); falls back to read-modify-write
+  // on databases where the function has not been created yet.
+  const { error: rpcError } = await workspace.supabase.rpc("update_deed_section", {
+    p_deed_id: deed.id,
+    p_section: parsed.data.section,
+    p_value: parsed.data.value as unknown as Json,
+  });
 
-  if (error) return { error: error.message };
+  if (rpcError) {
+    const missingFunction = rpcError.code === "PGRST202" || rpcError.code === "42883";
+    if (!missingFunction) return { error: rpcError.message };
+    const data = { ...parseDeedData(deed.data), [parsed.data.section]: parsed.data.value };
+    const { error } = await workspace.supabase
+      .from("deeds")
+      .update({ data: data as unknown as Json })
+      .eq("id", deed.id);
+    if (error) return { error: error.message };
+  }
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
