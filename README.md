@@ -1,6 +1,6 @@
 # DeedDraft
 
-DeedDraft is a secure, multi-tenant deed drafting workspace for Indian advocates and law firms. Phase 1 provides authentication, firm workspaces, deed tracking, document repositories, and drafting placeholders. It does not perform AI extraction or generate legal documents.
+DeedDraft is a secure, multi-tenant deed drafting workspace for Indian advocates and law firms. It provides authentication, firm workspaces, deed tracking, private document repositories, structured matter data (parties, property schedule with boundaries, consideration and payments) and draft generation: each deed can be previewed, printed / saved as PDF, or downloaded as a Word (.doc) draft for advocate review. It does not perform AI extraction. Matter details are stored in the existing `deeds.data` JSON column, so no new migration is needed.
 
 ## Prerequisites
 

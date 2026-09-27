@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { format, formatDistanceToNow } from "date-fns";
 import {
+  ArrowRight,
+  CheckCircle2,
+  Circle,
   Download,
   FileImage,
   FileText,
@@ -17,6 +20,7 @@ import {
 import { toast } from "sonner";
 
 import {
+  updateDeedSection,
   updateDeedStatus,
   updateDeedTitle,
   updateRemarks,
@@ -28,14 +32,23 @@ import {
   recategorizeDocument,
 } from "@/app/actions/documents";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
+import { PartiesSection, PaymentsSection, PropertiesSection, type SaveSection } from "@/components/deeds/deed-sections";
+import { DraftGenerator } from "@/components/deeds/draft-generator";
 import { Button } from "@/components/ui/button";
+import { getReadiness, paymentsTotal } from "@/lib/draft";
 import {
+  activityLabel,
   documentCategories,
   documentCategoryLabels,
+  formatINR,
+  hasConsideration,
+  languageLabels,
+  partyRoleLabels,
   statusLabels,
   type DocumentCategory,
   type DeedStatus,
 } from "@/lib/deeds";
+import type { DeedData } from "@/lib/schemas/deed-data";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, Deed } from "@/types/database";
 
@@ -43,16 +56,6 @@ type Document = Database["public"]["Tables"]["deed_documents"]["Row"];
 type Activity = Database["public"]["Tables"]["activity_log"]["Row"];
 type Tab = "overview" | "documents" | "parties" | "properties" | "payments" | "remarks" | "generate";
 type UploadItem = { id: string; file: File; category: DocumentCategory; status: "ready" | "uploading" | "complete" | "error" };
-
-const tabs: Array<{ id: Tab; label: string }> = [
-  { id: "overview", label: "Overview" },
-  { id: "documents", label: "Documents" },
-  { id: "parties", label: "Parties" },
-  { id: "properties", label: "Properties" },
-  { id: "payments", label: "Consideration & Payments" },
-  { id: "remarks", label: "Remarks & Instructions" },
-  { id: "generate", label: "Generate" },
-];
 
 const inputClass = "h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15";
 
@@ -71,20 +74,41 @@ export function DeedDetail({
   documents,
   activities,
   firmId,
+  firmName,
+  firmCity,
+  initialData,
 }: {
   deed: Deed;
   documents: Document[];
   activities: Activity[];
   firmId: string;
+  firmName: string;
+  firmCity: string;
+  initialData: DeedData;
 }) {
   const [tab, setTab] = useState<Tab>("overview");
   const [title, setTitle] = useState(deed.title);
   const [editingTitle, setEditingTitle] = useState(false);
   const [status, setStatus] = useState(deed.status);
   const [remarks, setRemarks] = useState(deed.remarks ?? "");
+  const [data, setData] = useState<DeedData>(initialData);
   const [savedState, setSavedState] = useState<"saved" | "saving" | "unsaved">("saved");
   const [pending, startTransition] = useTransition();
   const hasMounted = useRef(false);
+  const roles = partyRoleLabels[deed.deed_type];
+  const withPayments = hasConsideration(deed.deed_type);
+  const readiness = getReadiness(deed.deed_type, data, documents.length);
+  const readyCount = readiness.filter((item) => item.done).length;
+
+  const tabs: Array<{ id: Tab; label: string; count?: number }> = [
+    { id: "overview", label: "Overview" },
+    { id: "parties", label: "Parties", count: data.parties.length },
+    { id: "properties", label: "Properties", count: data.properties.length },
+    ...(withPayments ? [{ id: "payments" as const, label: "Consideration & Payments", count: data.payments.length }] : []),
+    { id: "documents", label: "Documents", count: documents.length },
+    { id: "remarks", label: "Remarks" },
+    { id: "generate", label: "Generate draft" },
+  ];
 
   useEffect(() => {
     if (!hasMounted.current) {
@@ -105,6 +129,20 @@ export function DeedDetail({
     return () => window.clearTimeout(timer);
   }, [deed.id, remarks]);
 
+  const saveSection = useCallback<SaveSection>(
+    async (section, value) => {
+      const result = await updateDeedSection({ id: deed.id, section, value });
+      if (result.error) {
+        toast.error(result.error);
+        return false;
+      }
+      setData((current) => ({ ...current, [section]: value }));
+      toast.success("Saved.");
+      return true;
+    },
+    [deed.id],
+  );
+
   const saveTitle = () => {
     const nextTitle = title.trim();
     if (!nextTitle || nextTitle === deed.title) return setEditingTitle(false);
@@ -118,11 +156,12 @@ export function DeedDetail({
   };
 
   const changeStatus = (nextStatus: DeedStatus) => {
+    const previous = status;
     setStatus(nextStatus);
     startTransition(() => {
       void updateDeedStatus({ id: deed.id, status: nextStatus }).then((result) => {
         if (result.error) {
-          setStatus(deed.status);
+          setStatus(previous);
           toast.error(result.error);
         } else {
           toast.success("Status updated.");
@@ -135,61 +174,88 @@ export function DeedDetail({
     all[document.category] = (all[document.category] ?? 0) + 1;
     return all;
   }, {});
+  const total = data.consideration.total ?? 0;
 
   return (
     <div className="space-y-6">
-      <section className="rounded-xl border border-border bg-card p-5 shadow-sm sm:p-6">
-        <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
-          <div className="min-w-0">
+      <section className="rounded-xl border border-border bg-card px-4 pt-5 shadow-sm sm:px-6 sm:pt-6">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <TypeBadge type={deed.deed_type} />
               <StatusBadge status={status} />
               <span className="font-mono text-xs font-semibold text-muted-foreground">{deed.reference_no}</span>
             </div>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="mt-3 flex items-start gap-2">
               {editingTitle ? (
-                <input autoFocus className="h-10 max-w-xl rounded-lg border border-primary bg-background px-3 text-xl font-semibold text-primary outline-none" onBlur={saveTitle} onChange={(event) => setTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveTitle(); if (event.key === "Escape") { setTitle(deed.title); setEditingTitle(false); } }} value={title} />
+                <input autoFocus className="h-11 w-full max-w-xl rounded-lg border border-primary bg-background px-3 text-lg font-semibold text-primary outline-none sm:text-xl" onBlur={saveTitle} onChange={(event) => setTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") saveTitle(); if (event.key === "Escape") { setTitle(deed.title); setEditingTitle(false); } }} value={title} />
               ) : (
-                <><h1 className="truncate text-2xl font-semibold tracking-tight text-primary sm:text-3xl">{title}</h1><button aria-label="Edit title" className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-primary" onClick={() => setEditingTitle(true)}><Pencil className="size-4" /></button></>
+                <><h1 className="min-w-0 break-words text-2xl font-semibold tracking-tight text-primary sm:text-3xl">{title}</h1><button aria-label="Edit title" className="mt-1 shrink-0 rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-primary" onClick={() => setEditingTitle(true)}><Pencil className="size-4" /></button></>
               )}
             </div>
-            <p className="mt-3 text-sm text-muted-foreground">Created {format(new Date(deed.created_at), "d MMM yyyy")} · Last updated {formatDistanceToNow(new Date(deed.updated_at), { addSuffix: true })}</p>
+            <p className="mt-2 text-sm text-muted-foreground">Created {format(new Date(deed.created_at), "d MMM yyyy")} · Updated {formatDistanceToNow(new Date(deed.updated_at), { addSuffix: true })}</p>
           </div>
-          <label className="text-sm font-medium text-primary">
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-primary sm:flex-row sm:items-center sm:gap-3">
             Matter status
-            <select className={"ml-3 " + inputClass} disabled={pending} onChange={(event) => changeStatus(event.target.value as DeedStatus)} value={status}>
+            <select className={inputClass + " w-full sm:w-48"} disabled={pending} onChange={(event) => changeStatus(event.target.value as DeedStatus)} value={status}>
               {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
         </div>
-        <nav className="-mb-5 mt-7 flex gap-1 overflow-x-auto border-t border-border pt-4 sm:-mb-6">
-          {tabs.map((item) => <button className={"whitespace-nowrap border-b-2 px-3 pb-4 text-sm font-medium " + (tab === item.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-primary")} key={item.id} onClick={() => setTab(item.id)}>{item.label}</button>)}
+        <nav className="-mx-4 mt-5 flex gap-1 overflow-x-auto border-t border-border px-2 sm:-mx-6 sm:px-4 [scrollbar-width:none]">
+          {tabs.map((item) => (
+            <button className={"flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3.5 text-sm font-medium transition " + (tab === item.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-primary")} key={item.id} onClick={() => setTab(item.id)} type="button">
+              {item.label}
+              {item.count ? <span className="rounded-full bg-secondary px-1.5 text-xs font-semibold text-secondary-foreground">{item.count}</span> : null}
+            </button>
+          ))}
         </nav>
       </section>
 
       {tab === "overview" ? (
-        <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <section className="grid gap-6 lg:grid-cols-2 xl:grid-cols-[1fr_1fr_1.1fr]">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-semibold text-primary">Drafting checklist</h2>
+              <span className="text-sm font-semibold text-primary">{readyCount}/{readiness.length}</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-secondary"><div className="h-full rounded-full bg-accent transition-all" style={{ width: (readyCount / readiness.length) * 100 + "%" }} /></div>
+            <ul className="mt-4 space-y-1">
+              {readiness.map((item) => (
+                <li key={item.label}>
+                  <button className="group flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-secondary" onClick={() => setTab(item.tab)} type="button">
+                    {item.done ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" /> : <Circle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
+                    <span className={"flex-1 " + (item.done ? "text-foreground" : "text-muted-foreground")}>{item.label}{item.optional ? <span className="text-xs"> · recommended</span> : null}</span>
+                    <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <Button className="mt-4 h-10 w-full" onClick={() => setTab("generate")} type="button">Preview draft <ArrowRight className="size-4" /></Button>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
             <h2 className="font-semibold text-primary">Matter summary</h2>
-            <dl className="mt-5 space-y-4 text-sm">
-              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Reference number</dt><dd className="font-mono font-semibold text-primary">{deed.reference_no}</dd></div>
-              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Draft language</dt><dd className="font-medium capitalize text-primary">{deed.language}</dd></div>
-              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Uploaded documents</dt><dd className="font-semibold text-primary">{documents.length}</dd></div>
-              <div><dt className="text-muted-foreground">Document categories</dt><dd className="mt-2 flex flex-wrap gap-2">{Object.entries(counts).length ? Object.entries(counts).map(([category, count]) => <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground" key={category}>{documentCategoryLabels[category as DocumentCategory]} · {count}</span>) : <span className="text-sm text-muted-foreground">No documents uploaded.</span>}</dd></div>
+            <dl className="mt-4 space-y-3 text-sm">
+              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Reference</dt><dd className="font-mono font-semibold text-primary">{deed.reference_no}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Draft language</dt><dd className="font-medium text-primary">{languageLabels[deed.language]}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">{roles.first}</dt><dd className="truncate text-right font-medium text-primary">{data.parties.filter((party) => party.role === "first").map((party) => party.fullName).join(", ") || "—"}</dd></div>
+              <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">{roles.second}</dt><dd className="truncate text-right font-medium text-primary">{data.parties.filter((party) => party.role === "second").map((party) => party.fullName).join(", ") || "—"}</dd></div>
+              {withPayments ? <div className="flex justify-between gap-4 border-b border-border pb-3"><dt className="text-muted-foreground">Consideration</dt><dd className="text-right font-semibold text-primary">{total ? formatINR(total) : "—"}{total ? <span className="block text-xs font-normal text-muted-foreground">{formatINR(paymentsTotal(data))} received</span> : null}</dd></div> : null}
+              <div><dt className="text-muted-foreground">Documents</dt><dd className="mt-2 flex flex-wrap gap-2">{Object.entries(counts).length ? Object.entries(counts).map(([category, count]) => <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground" key={category}>{documentCategoryLabels[category as DocumentCategory]} · {count}</span>) : <span className="text-sm text-muted-foreground">No documents uploaded.</span>}</dd></div>
             </dl>
           </div>
-          <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5 lg:col-span-2 xl:col-span-1">
             <h2 className="font-semibold text-primary">Activity</h2>
-            {activities.length ? <ol className="mt-5 space-y-5 border-l border-border pl-5">{activities.map((activity) => <li className="relative" key={activity.id}><span className="absolute -left-[1.72rem] top-1 size-2.5 rounded-full bg-accent ring-4 ring-card" /><p className="text-sm font-medium text-primary">{activity.action.replaceAll("_", " ")}</p><p className="mt-1 text-xs text-muted-foreground">{formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}</p></li>)}</ol> : <p className="mt-5 text-sm text-muted-foreground">Activity will appear as this matter develops.</p>}
+            {activities.length ? <ol className="mt-5 max-h-96 space-y-5 overflow-y-auto border-l border-border pl-5">{activities.map((activity) => <li className="relative" key={activity.id}><span className="absolute -left-[1.72rem] top-1 size-2.5 rounded-full bg-accent ring-4 ring-card" /><p className="text-sm font-medium text-primary">{activityLabel(activity.action)}</p><p className="mt-1 text-xs text-muted-foreground">{formatDistanceToNow(new Date(activity.created_at), { addSuffix: true })}</p></li>)}</ol> : <p className="mt-5 text-sm text-muted-foreground">Activity will appear as this matter develops.</p>}
           </div>
         </section>
       ) : null}
       {tab === "documents" ? <DocumentsTab deedId={deed.id} documents={documents} firmId={firmId} /> : null}
-      {tab === "parties" ? <EmptyPlaceholder description="Sellers, buyers and witnesses will be managed here." title="Parties are coming next" /> : null}
-      {tab === "properties" ? <EmptyPlaceholder description="Multiple properties with description, boundaries (North, South, East, West), and naksha/map will be managed here." title="Property details are coming next" /> : null}
-      {tab === "payments" ? <EmptyPlaceholder description="Total consideration, token amount, cheque and RTGS/UTR payments will be managed here." title="Payments are coming next" /> : null}
-      {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-5 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">These notes stay with the matter and guide the next drafting phase.</p></div><span className={"text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
-      {tab === "generate" ? <section className="rounded-xl border border-border bg-card px-6 py-14 text-center shadow-sm"><FileText className="mx-auto size-9 text-accent-foreground" /><h2 className="mt-4 text-lg font-semibold text-primary">Draft generation is the next phase</h2><p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">Once parties, properties, and supporting documents are complete, this space will generate a lawyer-reviewed DOCX draft.</p><Button className="mt-6" disabled>Generate Draft (DOCX)</Button></section> : null}
+      {tab === "parties" ? <PartiesSection deedType={deed.deed_type} parties={data.parties} save={saveSection} /> : null}
+      {tab === "properties" ? <PropertiesSection properties={data.properties} save={saveSection} /> : null}
+      {tab === "payments" ? <PaymentsSection consideration={data.consideration} payments={data.payments} save={saveSection} /> : null}
+      {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">These notes stay with the matter and guide drafting.</p></div><span className={"shrink-0 text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
+      {tab === "generate" ? <DraftGenerator city={firmCity} data={data} firmName={firmName} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
     </div>
   );
 }
@@ -271,10 +337,10 @@ function DocumentsTab({ deedId, documents, firmId }: { deedId: string; documents
         {documents.length ? <div className="divide-y divide-border">{documentCategories.map((category) => {
           const group = documents.filter((document) => document.category === category);
           if (!group.length) return null;
-          return <div className="p-5" key={category}><h3 className="text-sm font-semibold text-primary">{documentCategoryLabels[category]} <span className="text-muted-foreground">({group.length})</span></h3><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map((document) => <div className="flex min-w-0 items-center gap-3 rounded-lg border border-border p-3" key={document.id}>{document.mime_type.startsWith("image/") ? <FileImage className="size-7 shrink-0 text-accent-foreground" /> : <FileText className="size-7 shrink-0 text-destructive" />}<div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-primary">{document.file_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{Math.round(document.size_bytes / 1024)} KB · {format(new Date(document.created_at), "d MMM yyyy")}</p></div><select aria-label={"Category for " + document.file_name} className="h-8 max-w-32 rounded-md border border-border bg-background px-1 text-xs" disabled={pending} onChange={(event) => startTransition(() => void recategorizeDocument({ id: document.id, category: event.target.value }).then((result) => { if (result.error) toast.error(result.error); else toast.success("Category updated."); }))} value={document.category}>{documentCategories.map((value) => <option key={value} value={value}>{documentCategoryLabels[value]}</option>)}</select><button aria-label={"Preview " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary" onClick={() => openPreview(document)}><Download className="size-4" /></button><button aria-label={"Delete " + document.file_name} className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeDocument(document.id)}><Trash2 className="size-4" /></button></div>)}</div></div>;
+          return <div className="p-4 sm:p-5" key={category}><h3 className="text-sm font-semibold text-primary">{documentCategoryLabels[category]} <span className="text-muted-foreground">({group.length})</span></h3><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map((document) => <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-border p-3 sm:flex-nowrap" key={document.id}>{document.mime_type.startsWith("image/") ? <FileImage className="size-7 shrink-0 text-accent-foreground" /> : <FileText className="size-7 shrink-0 text-destructive" />}<div className="min-w-0 flex-1 basis-40"><p className="truncate text-sm font-medium text-primary">{document.file_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{Math.round(document.size_bytes / 1024)} KB · {format(new Date(document.created_at), "d MMM yyyy")}</p></div><select aria-label={"Category for " + document.file_name} className="h-8 max-w-36 flex-1 rounded-md border sm:flex-none border-border bg-background px-1 text-xs" disabled={pending} onChange={(event) => startTransition(() => void recategorizeDocument({ id: document.id, category: event.target.value }).then((result) => { if (result.error) toast.error(result.error); else toast.success("Category updated."); }))} value={document.category}>{documentCategories.map((value) => <option key={value} value={value}>{documentCategoryLabels[value]}</option>)}</select><button aria-label={"Preview " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary" onClick={() => openPreview(document)}><Download className="size-4" /></button><button aria-label={"Delete " + document.file_name} className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeDocument(document.id)}><Trash2 className="size-4" /></button></div>)}</div></div>;
         })}</div> : <EmptyPlaceholder description="Upload a title deed, jamabandi, ID proof, map, or payment record to keep it ready for review." title="No documents yet" />}
       </div>
-      {preview ? <div className="fixed inset-0 z-50 grid place-items-center bg-primary/50 p-4"><div className="flex h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl"><div className="flex items-center justify-between border-b border-border px-4 py-3"><p className="truncate text-sm font-semibold text-primary">{preview.name}</p><div className="flex items-center gap-2"><a className="rounded-md px-2 py-1 text-sm font-semibold text-primary hover:bg-secondary" href={preview.url} rel="noreferrer" target="_blank">Download</a><button aria-label="Close preview" className="rounded-md p-2 hover:bg-secondary" onClick={() => setPreview(null)}><X className="size-4" /></button></div></div>{preview.mime.startsWith("image/") ? <div className="flex flex-1 items-center justify-center bg-secondary/50 p-4"><img alt={preview.name} className="max-h-full max-w-full object-contain" src={preview.url} /></div> : <iframe className="min-h-0 flex-1" src={preview.url} title={preview.name} />}</div></div> : null}
+      {preview ? <div className="fixed inset-0 z-50 grid place-items-center bg-primary/50 p-4"><div className="flex h-[85dvh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl"><div className="flex items-center justify-between border-b border-border px-4 py-3"><p className="truncate text-sm font-semibold text-primary">{preview.name}</p><div className="flex items-center gap-2"><a className="rounded-md px-2 py-1 text-sm font-semibold text-primary hover:bg-secondary" href={preview.url} rel="noreferrer" target="_blank">Download</a><button aria-label="Close preview" className="rounded-md p-2 hover:bg-secondary" onClick={() => setPreview(null)}><X className="size-4" /></button></div></div>{preview.mime.startsWith("image/") ? <div className="flex flex-1 items-center justify-center bg-secondary/50 p-4"><img alt={preview.name} className="max-h-full max-w-full object-contain" src={preview.url} /></div> : <iframe className="min-h-0 flex-1" src={preview.url} title={preview.name} />}</div></div> : null}
     </section>
   );
 }
