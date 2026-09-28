@@ -6,20 +6,23 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
 import { LoaderCircle, Save } from "lucide-react";
 
+import { ClauseAssistant } from "@/components/deeds/ai/clause-assistant";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass, textareaClass } from "@/components/ui/field";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
-import { formatINR } from "@/lib/deeds";
+import { formatINR, type DeedLanguage } from "@/lib/deeds";
 import { rentSchedule } from "@/lib/drafting";
 import { englishLongDate, shortDate, termEndDate } from "@/lib/drafting/hindi";
 import { executionSchema, termsSchema, type Execution, type Terms } from "@/lib/schemas/deed-data";
 
 import { CheckboxField, FormGroup, cardClass, type SaveSection } from "./shared";
 
-export function TermsSection({ deedType, terms, execution, firmCity, save }: { deedType: DeedType; terms: Terms; execution: Execution; firmCity: string; save: SaveSection }) {
+type AiProps = { aiEnabled?: boolean; deedId?: string; deedLanguage?: DeedLanguage };
+
+export function TermsSection({ deedType, terms, execution, firmCity, save, aiEnabled, deedId, deedLanguage }: { deedType: DeedType; terms: Terms; execution: Execution; firmCity: string; save: SaveSection } & AiProps) {
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-      <TermsCard deedType={deedType} key={JSON.stringify(terms)} save={save} terms={terms} />
+      <TermsCard aiEnabled={aiEnabled} deedId={deedId} deedLanguage={deedLanguage} deedType={deedType} key={JSON.stringify(terms)} save={save} terms={terms} />
       <ExecutionCard deedType={deedType} execution={execution} firmCity={firmCity} key={JSON.stringify(execution)} save={save} />
     </div>
   );
@@ -41,7 +44,7 @@ const blankTerms = (terms: Terms): z.input<typeof termsSchema> => {
   return values as z.input<typeof termsSchema>;
 };
 
-function TermsCard({ deedType, terms, save }: { deedType: DeedType; terms: Terms; save: SaveSection }) {
+function TermsCard({ deedType, terms, save, aiEnabled, deedId, deedLanguage = "hindi" }: { deedType: DeedType; terms: Terms; save: SaveSection } & AiProps) {
   const kind = getDeedType(deedType).terms;
   const [pending, startTransition] = useTransition();
   const form = useForm<z.input<typeof termsSchema>, unknown, Terms>({ resolver: zodResolver(termsSchema), defaultValues: blankTerms(terms) });
@@ -186,6 +189,16 @@ function TermsCard({ deedType, terms, save }: { deedType: DeedType; terms: Terms
       <Field hint="one clause per line; added before the schedule" label="Additional clauses">
         <textarea className={textareaClass + " min-h-28"} placeholder="यह कि ..." {...form.register("additionalClauses")} />
       </Field>
+      {aiEnabled && deedId ? (
+        <ClauseAssistant
+          deedId={deedId}
+          deedLanguage={deedLanguage}
+          onInsert={(clauses) => {
+            const current = String(form.getValues("additionalClauses") ?? "").trim();
+            form.setValue("additionalClauses", [current, ...clauses].filter(Boolean).join("\n"), { shouldDirty: true });
+          }}
+        />
+      ) : null}
       <SaveButton dirty={form.formState.isDirty} label="Save terms" pending={pending} />
     </form>
   );

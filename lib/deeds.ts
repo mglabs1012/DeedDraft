@@ -171,6 +171,9 @@ export const activityLabels: Record<string, string> = {
   updated_firm_settings: "Firm settings updated",
   updated_profile: "Profile updated",
   seeded_demo_deed: "Demo deed added",
+  ai_extracted_document: "AI extracted a document",
+  ai_drafted_clauses: "AI drafted clauses",
+  ai_reviewed_deed: "AI reviewed the matter",
 };
 
 export function activityLabel(action: string) {

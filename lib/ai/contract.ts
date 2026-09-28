@@ -1,8 +1,7 @@
 /**
- * Contract for upcoming AI features (extraction from property papers, clause
- * drafting and translation). Nothing here calls a model yet — it fixes the shape
- * of what a model receives and how its output is merged, so the UI and drafting
- * engine don't change when AI is plugged in.
+ * Shared AI contract: the context shape for model calls and the
+ * non-destructive merge used when applying AI extraction results.
+ * Model calls live in lib/ai/openrouter.ts and app/actions/ai.ts.
  */
 
 import { getDeedType, type DeedType } from "@/lib/deed-types";
@@ -41,12 +40,24 @@ export function buildAiContext(input: Omit<AiDeedContext, "deedTypeLabel">): AiD
   return { ...input, deedTypeLabel: getDeedType(input.deedType).label };
 }
 
+type Loose = Record<string, unknown>;
+const norm = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/** What makes two list items "the same" when merging AI output into a matter. */
+const identityKeys: Record<string, (item: Loose) => string> = {
+  parties: (item) => norm(item.role) + "|" + norm(item.fullName),
+  properties: (item) => norm(item.identifier) + "|" + norm(item.khasra) + "|" + (norm(item.identifier) || norm(item.khasra) ? "" : norm(item.description)),
+  titleChain: (item) => norm(item.instrument) + "|" + norm(item.date) + "|" + (norm(item.serial) || norm(item.from)),
+  payments: (item) => String(item.amount ?? "") + "|" + norm(item.reference) + "|" + norm(item.mode),
+};
+
 const isEmpty = (value: unknown) => value === undefined || value === null || value === "";
 
 /**
  * Merges model output into existing data without overwriting anything the
- * advocate has already entered: new list items are appended, empty scalar
- * fields are filled, and the result is re-validated.
+ * advocate has already entered: new list items are appended (duplicates of
+ * existing items are skipped), empty scalar fields are filled, and the result
+ * is re-validated.
  */
 export function mergeExtraction(current: DeedData, extraction: Partial<DeedData>): DeedData {
   const merged: Record<string, unknown> = { ...current };
@@ -54,8 +65,14 @@ export function mergeExtraction(current: DeedData, extraction: Partial<DeedData>
     const existing = (current as Record<string, unknown>)[key];
     if (Array.isArray(value)) {
       const list = Array.isArray(existing) ? existing : [];
-      const ids = new Set(list.map((item) => (item as { id?: string }).id));
-      merged[key] = [...list, ...value.filter((item) => !ids.has((item as { id?: string }).id))];
+      const identity = identityKeys[key] ?? ((item: Loose) => String(item.id ?? ""));
+      const seen = new Set(list.map((item) => identity(item as Loose)));
+      merged[key] = [...list, ...value.filter((item) => {
+        const id = identity(item as Loose);
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })];
     } else if (value && typeof value === "object") {
       const target = { ...((existing as Record<string, unknown>) ?? {}) };
       for (const [field, fieldValue] of Object.entries(value)) {
