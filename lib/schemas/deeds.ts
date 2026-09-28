@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-const deedType = z.enum(["sale", "release", "gift", "partition", "will", "other"]);
+import { deedTypeIds } from "@/lib/deed-types";
+
+const deedType = z.enum(deedTypeIds);
 const deedLanguage = z.enum(["english", "hindi", "bilingual"]);
 const deedStatus = z.enum([
   "draft",

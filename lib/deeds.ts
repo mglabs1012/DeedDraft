@@ -1,26 +1,25 @@
+import { deedTypeOrder, deedTypes, getDeedType, type DeedType } from "@/lib/deed-types";
 import type { Database } from "@/types/database";
 
-export type DeedType = Database["public"]["Enums"]["deed_type"];
+export type { DeedType } from "@/lib/deed-types";
 export type DeedStatus = Database["public"]["Enums"]["deed_status"];
 export type DeedLanguage = Database["public"]["Enums"]["deed_language"];
 export type DocumentCategory = Database["public"]["Enums"]["document_category"];
 
-export const deedTypeLabels: Record<DeedType, string> = {
-  sale: "Sale Deed",
-  release: "Release Deed",
-  gift: "Gift Deed",
-  partition: "Partition Deed",
-  will: "Will",
-  other: "Other / Custom",
-};
+export const deedTypeLabels = Object.fromEntries(deedTypeOrder.map((type) => [type, deedTypes[type].label])) as Record<DeedType, string>;
 
-export const deedTypeDescriptions: Record<Exclude<DeedType, "other">, string> = {
-  sale: "बिक्री दस्तावेज़ / Property transfer",
-  release: "अधिकार त्याग / Release of rights",
-  gift: "उपहार दस्तावेज़ / Gift transfer",
-  partition: "बँटवारा दस्तावेज़ / Family partition",
-  will: "वसीयत / Testamentary document",
-};
+export const deedTypeDescriptions = Object.fromEntries(
+  deedTypeOrder.map((type) => [type, deedTypes[type].labelHi + " / " + deedTypes[type].description]),
+) as Record<DeedType, string>;
+
+export const partyRoleLabels = Object.fromEntries(
+  deedTypeOrder.map((type) => [type, Object.fromEntries(Object.entries(deedTypes[type].roles).map(([role, def]) => [role, def.en]))]),
+) as Record<DeedType, Record<"first" | "second" | "other" | "witness", string>>;
+
+/** Deed types that carry a monetary consideration. */
+export function hasConsideration(type: DeedType) {
+  return getDeedType(type).consideration !== "none";
+}
 
 export const statusLabels: Record<DeedStatus, string> = {
   draft: "Draft",
@@ -31,18 +30,19 @@ export const statusLabels: Record<DeedStatus, string> = {
 };
 
 export const documentCategoryLabels: Record<DocumentCategory, string> = {
-  naksha_map: "Naksha / Map",
-  id_proof: "ID proof",
   prior_title_deed: "Prior title deed",
+  patta: "Patta / lease from authority",
   jamabandi: "Jamabandi",
+  naksha_map: "Naksha / site plan",
+  id_proof: "ID proof (Aadhaar / PAN)",
   payment_proof: "Payment proof",
+  loan_papers: "Loan sanction / bank papers",
+  stamp_paper: "e-Stamp / stamp paper",
   photograph: "Photograph",
   other: "Other",
 };
 
-export const documentCategories = Object.keys(
-  documentCategoryLabels,
-) as DocumentCategory[];
+export const documentCategories = Object.keys(documentCategoryLabels) as DocumentCategory[];
 
 export const languageLabels: Record<DeedLanguage, string> = {
   english: "English",
@@ -50,32 +50,43 @@ export const languageLabels: Record<DeedLanguage, string> = {
   bilingual: "Bilingual",
 };
 
-type PartyRoleLabels = Record<"first" | "second" | "witness" | "other", string>;
-
-const defaultRoles: PartyRoleLabels = {
-  first: "First party",
-  second: "Second party",
-  witness: "Witness",
-  other: "Confirming party",
-};
-
-export const partyRoleLabels: Record<DeedType, PartyRoleLabels> = {
-  sale: { ...defaultRoles, first: "Seller (Vendor)", second: "Buyer (Vendee)" },
-  release: { ...defaultRoles, first: "Releasor", second: "Releasee" },
-  gift: { ...defaultRoles, first: "Donor", second: "Donee" },
-  partition: { ...defaultRoles, first: "Co-sharer (first part)", second: "Co-sharer (other parts)" },
-  will: { ...defaultRoles, first: "Testator", second: "Beneficiary", other: "Executor" },
-  other: defaultRoles,
-};
-
 export const propertyKindLabels = {
   plot: "Residential plot",
   house: "House / building",
   flat: "Flat / apartment",
-  shop: "Shop / commercial",
+  shop: "Shop / showroom",
+  office: "Office premises",
   agricultural: "Agricultural land",
+  industrial: "Industrial plot / shed",
   other: "Other",
 } as const;
+
+export const propertyKindHindi: Record<keyof typeof propertyKindLabels, string> = {
+  plot: "भूखण्ड",
+  house: "आवासीय सम्पत्ति",
+  flat: "फ्लैट",
+  shop: "दुकान",
+  office: "कार्यालय परिसर",
+  agricultural: "कृषि भूमि",
+  industrial: "औद्योगिक भूखण्ड",
+  other: "सम्पत्ति",
+};
+
+export const landUseLabels = {
+  residential: "Residential",
+  commercial: "Commercial",
+  agricultural: "Agricultural",
+  industrial: "Industrial",
+  mixed: "Mixed use",
+} as const;
+
+export const landUseHindi: Record<keyof typeof landUseLabels, string> = {
+  residential: "आवासीय",
+  commercial: "व्यावसायिक",
+  agricultural: "कृषि",
+  industrial: "औद्योगिक",
+  mixed: "मिश्रित",
+};
 
 export const areaUnitLabels = {
   sq_ft: "sq. ft.",
@@ -86,19 +97,59 @@ export const areaUnitLabels = {
   acre: "acre",
 } as const;
 
+export const areaUnitHindi: Record<keyof typeof areaUnitLabels, string> = {
+  sq_ft: "वर्गफुट",
+  sq_yd: "वर्गगज",
+  sq_m: "वर्गमीटर",
+  bigha: "बीघा",
+  hectare: "हैक्टेयर",
+  acre: "एकड़",
+};
+
 export const paymentModeLabels = {
   cash: "Cash",
   cheque: "Cheque",
-  rtgs_neft: "RTGS / NEFT",
-  upi: "UPI",
+  bankers_cheque: "Banker's cheque",
   dd: "Demand draft",
+  rtgs_neft: "RTGS / NEFT / IMPS",
+  upi: "UPI",
+  tds_challan: "TDS challan",
   other: "Other",
 } as const;
 
-/** Deed types that carry a monetary consideration. */
-export function hasConsideration(type: DeedType) {
-  return type === "sale" || type === "release" || type === "other";
-}
+export const paymentNatureLabels = {
+  earnest: "Earnest money / advance (साई)",
+  payment: "Consideration payment",
+  loan: "Paid from buyer's bank loan",
+} as const;
+
+export const instrumentLabels = {
+  sale_deed: "Registered sale deed",
+  patta: "Patta / lease deed from authority",
+  allotment: "Allotment letter",
+  gift_deed: "Gift deed",
+  rectification: "Rectification deed (शुद्धि पत्र)",
+  agreement_to_sell: "Registered agreement to sell",
+  partition_deed: "Partition deed",
+  release_deed: "Release deed",
+  will: "Will / probate",
+  inheritance: "Inheritance (succession)",
+  other: "Other instrument",
+} as const;
+
+export const instrumentHindi: Record<keyof typeof instrumentLabels, string> = {
+  sale_deed: "रजिस्टर्ड विक्रय पत्र",
+  patta: "पट्टा विलेख",
+  allotment: "आवंटन पत्र",
+  gift_deed: "रजिस्टर्ड दान पत्र",
+  rectification: "शुद्धि पत्र विलेख",
+  agreement_to_sell: "रजिस्टर्ड विक्रय इकरारनामा",
+  partition_deed: "रजिस्टर्ड विभाजन पत्र",
+  release_deed: "रजिस्टर्ड हक त्याग पत्र",
+  will: "वसीयतनामा",
+  inheritance: "उत्तराधिकार",
+  other: "विलेख",
+};
 
 export const activityLabels: Record<string, string> = {
   created_deed: "Deed created",
@@ -112,8 +163,11 @@ export const activityLabels: Record<string, string> = {
   deleted_document: "Document deleted",
   updated_parties: "Parties updated",
   updated_properties: "Properties updated",
+  updated_titleChain: "Chain of title updated",
   updated_payments: "Payments updated",
   updated_consideration: "Consideration updated",
+  updated_terms: "Terms updated",
+  updated_execution: "Execution details updated",
   updated_firm_settings: "Firm settings updated",
   updated_profile: "Profile updated",
   seeded_demo_deed: "Demo deed added",

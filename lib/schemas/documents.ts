@@ -7,6 +7,9 @@ export const documentCategorySchema = z.enum([
   "jamabandi",
   "payment_proof",
   "photograph",
+  "patta",
+  "loan_papers",
+  "stamp_paper",
   "other",
 ]);
 

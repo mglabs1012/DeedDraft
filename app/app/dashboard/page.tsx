@@ -1,29 +1,13 @@
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
-import {
-  ArrowRight,
-  FileHeart,
-  FileSignature,
-  Files,
-  Gift,
-  Landmark,
-  MapPinned,
-  Plus,
-  ScrollText,
-} from "lucide-react";
+import { ArrowRight, FileSignature, Files, Landmark, Plus, ScrollText } from "lucide-react";
 
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
-import { deedTypeDescriptions, deedTypeLabels, type DeedType } from "@/lib/deeds";
+import { DeedIcon } from "@/components/deeds/deed-icon";
+import { deedTypeOrder, deedTypes } from "@/lib/deed-types";
 import { getCurrentWorkspace } from "@/lib/workspace";
 import type { Deed } from "@/types/database";
 
-const deedIcons: Record<Exclude<DeedType, "other">, typeof FileSignature> = {
-  sale: FileSignature,
-  release: FileHeart,
-  gift: Gift,
-  partition: MapPinned,
-  will: ScrollText,
-};
 
 export default async function DashboardPage() {
   const workspace = await getCurrentWorkspace();
@@ -86,21 +70,19 @@ export default async function DashboardPage() {
             See all <ArrowRight className="size-4" />
           </Link>
         </div>
-        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          {(Object.keys(deedIcons) as Array<Exclude<DeedType, "other">>).map((type) => {
-            const Icon = deedIcons[type];
-            return (
-              <Link
-                className="group rounded-xl border border-border p-4 transition hover:-translate-y-0.5 hover:border-primary/30 hover:bg-secondary"
-                href={"/app/deeds/new?type=" + type}
-                key={type}
-              >
-                <Icon className="size-5 text-accent-foreground" />
-                <p className="mt-5 text-sm font-semibold text-primary">{deedTypeLabels[type]}</p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">{deedTypeDescriptions[type]}</p>
-              </Link>
-            );
-          })}
+        <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+          {deedTypeOrder.filter((type) => type !== "other").map((type) => (
+            <Link
+              className="group rounded-xl border border-border p-3 transition hover:-translate-y-0.5 hover:border-primary/30 hover:bg-secondary sm:p-4"
+              href={"/app/deeds/new?type=" + type}
+              key={type}
+            >
+              <DeedIcon className="size-5 text-accent-foreground" type={type} />
+              <p className="mt-4 text-sm font-semibold text-primary">{deedTypes[type].label}</p>
+              <p className="font-devanagari text-xs text-foreground/80">{deedTypes[type].labelHi}</p>
+              <p className="mt-1 hidden text-xs leading-5 text-muted-foreground sm:block">{deedTypes[type].description}</p>
+            </Link>
+          ))}
         </div>
       </section>
 

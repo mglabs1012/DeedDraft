@@ -1,6 +1,8 @@
 # DeedDraft
 
-DeedDraft is a secure, multi-tenant deed drafting workspace for Indian advocates and law firms. It provides authentication, firm workspaces, deed tracking, private document repositories, structured matter data (parties, property schedule with boundaries, consideration and payments) and draft generation: each deed can be previewed, printed / saved as PDF, or downloaded as a Word (.doc) draft for advocate review. It does not perform AI extraction. Matter details are stored in the existing `deeds.data` JSON column, so no new migration is needed.
+DeedDraft is a secure, multi-tenant deed drafting workspace for Indian advocates and law firms, built around Rajasthan drafting practice. Advocates record a matter once — parties, property schedule with boundaries and side measurements, chain of title with Sub-Registrar references, consideration and payments, and deed-specific terms — and generate a registration-ready draft in **Hindi, English or both**, as a Word (.doc) file or PDF.
+
+Supported instruments: Sale Deed (विक्रय पत्र), Agreement to Sell (विक्रय इकरारनामा), Gift Deed (दान पत्र), Release Deed (हक त्याग पत्र), Partition Deed (विभाजन पत्र), Will (वसीयतनामा), Lease Deed (पट्टा विलेख), Rent Deed (किरायानामा) and a custom deed.
 
 ## Prerequisites
 
@@ -16,10 +18,13 @@ npm install
 
 ## 2. Configure Supabase
 
-Create a new Supabase project, then run both SQL files in order in the Supabase SQL Editor:
+Create a new Supabase project, then run the SQL files in order in the Supabase SQL Editor:
 
 1. \`supabase/migrations/202609270001_init_deeddraft.sql\`
 2. \`supabase/migrations/202609270002_shared_profile_reads.sql\`
+3. \`supabase/migrations/202609270003_more_deed_types.sql\` — adds Agreement to Sell, Lease and Rent deed types, new document categories and the atomic \`update_deed_section\` function
+
+Existing projects only need to run migration 3. Until it is applied, the app falls back to a non-atomic save.
 
 The first migration creates all tables, RLS policies, triggers, the private \`deed-documents\` bucket, and Storage policies. Do not create a separate public bucket.
 
@@ -86,8 +91,12 @@ Run it only on a development project.
 
 \`\`\`powershell
 npm run lint
+npm run typecheck
+npm test
 npm run build
 \`\`\`
+
+\`npm test\` runs fast checks of the drafting engine against real-world values (Hindi amount words, e-stamp duty and surcharges, lease escalation schedule, rent term dates, Kruti Dev conversion) and renders every deed type in every language.
 
 ## Troubleshooting: page shows no styling
 
@@ -100,6 +109,26 @@ npm run dev
 
 Then hard-refresh the browser (Ctrl+Shift+R). Never run `npm run build` while `npm run start` is serving the same folder.
 
+## How drafting works
+
+| Piece | Location |
+| --- | --- |
+| Deed-type registry (labels, Hindi party terms, tabs, terms, languages) | \`lib/deed-types.ts\` |
+| Structured matter data (single contract for UI, drafting and AI) | \`lib/schemas/deed-data.ts\` |
+| Drafting engine: Hindi numbers/dates, formatting, shared clauses | \`lib/drafting/\` |
+| Templates per instrument | \`lib/drafting/templates/\` |
+| Rajasthan stamp-duty estimate | \`lib/stamp-duty.ts\` |
+| Kruti Dev 010 → Unicode converter for legacy Hindi papers | \`lib/text/krutidev.ts\` |
+| AI integration contract (context + non-destructive merge) | \`lib/ai/contract.ts\` |
+
+Templates return typed blocks (paragraphs, numbered clauses, boundary tables, signatures) that one renderer turns into HTML, so every user value is escaped in one place and future AI features can insert or rewrite individual clauses. Hindi drafts pick the correct gendered and plural party terms (विक्रेता / विक्रेती / विक्रेतीगण), write amounts in Hindi words (अक्षरे … रूपये मात्र) and state areas as sq. m. = sq. yd. = sq. ft.
+
+To add a deed type: add an enum value in a migration, add an entry to \`lib/deed-types.ts\`, and add a template to \`lib/drafting/templates\`. The new-deed picker, tabs, checklist and template library pick it up automatically.
+
+## AI readiness
+
+All matter data lives in versioned JSON (\`deeds.data\`) validated by one schema. \`lib/ai/contract.ts\` defines the context a model will receive and \`mergeExtraction\`, which fills only empty fields and appends new list items so extracted data never overwrites advocate input. Uploaded papers are categorised (prior deed, patta, jamabandi, naksha, loan papers, e-stamp…) and the Kruti Dev converter turns legacy-font text into Unicode for extraction. The Generate tab can export a matter as JSON.
+
 ## Security model
 
 - Every firm-scoped table has Supabase RLS enabled.
@@ -108,3 +137,5 @@ Then hard-refresh the browser (Ctrl+Shift+R). Never run `npm run build` while `n
 - The document bucket is private and uses the required \`{firm_id}/{deed_id}/{file}\` path.
 - The application creates time-limited signed URLs for document previews and downloads.
 - The Supabase service-role/secret key is isolated in \`lib/supabase/admin.ts\`, a server-only module.
+- Section saves go through \`update_deed_section\` (SECURITY INVOKER, so RLS still applies), updating one JSON section atomically so colleagues editing different sections never overwrite each other.
+- Security headers (nosniff, frame denial, referrer policy, permissions policy, HSTS) are set in \`next.config.ts\`.
