@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { Braces, CheckCircle2, Circle, FileDown, Printer, Stamp } from "lucide-react";
 
+import { DeedReview } from "@/components/deeds/ai/deed-review";
 import { Button } from "@/components/ui/button";
 import type { DeedType, SectionId } from "@/lib/deed-types";
 import type { DeedLanguage, DeedStatus } from "@/lib/deeds";
@@ -11,6 +12,8 @@ import type { DeedData } from "@/lib/schemas/deed-data";
 import { cn } from "@/lib/utils";
 
 type Props = {
+  aiEnabled?: boolean;
+  deedId?: string;
   type: DeedType;
   title: string;
   referenceNo: string;
@@ -38,7 +41,7 @@ function download(content: BlobPart[], type: string, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function DraftGenerator({ type, title, referenceNo, language, data, firmName, city, readiness, status, onMarkGenerated, onJump, pending }: Props) {
+export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, language, data, firmName, city, readiness, status, onMarkGenerated, onJump, pending }: Props) {
   const choices = draftChoices(type);
   const [choice, setChoice] = useState<DraftChoice>(() => defaultDraftChoice(type, language));
   const { html } = useMemo(() => buildDraft({ type, title, referenceNo, data, firmName, firmCity: city }, choice), [type, title, referenceNo, data, firmName, city, choice]);
@@ -84,6 +87,7 @@ export function DraftGenerator({ type, title, referenceNo, language, data, firmN
             ))}
           </ul>
         </section>
+        {aiEnabled && deedId ? <DeedReview deedId={deedId} onJump={onJump} /> : null}
         <section className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
           <h2 className="mb-1 font-semibold text-primary">Export</h2>
           {choices.length > 1 ? (

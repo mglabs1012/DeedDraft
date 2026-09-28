@@ -6,6 +6,8 @@
 import assert from "node:assert/strict";
 
 import { mergeExtraction } from "../lib/ai/contract";
+import { normaliseClauses, normaliseExtraction, normaliseReview, parseJsonResponse, toIsoDate, toNumber } from "../lib/ai/parse";
+import { clausePrompt, extractionPrompt, reviewPrompt } from "../lib/ai/prompts";
 import { deedTypeOrder, deedTypes } from "../lib/deed-types";
 import { buildDraft, draftChoices, getReadiness, rentSchedule } from "../lib/drafting";
 import { areaTriple, hindiTerm, moneyHi } from "../lib/drafting/format";
@@ -162,6 +164,80 @@ test("AI extraction merge never overwrites advocate input", () => {
   assert.equal(merged.parties.length, sample.parties.length + 1);
   assert.equal(merged.consideration.total, 450000);
   assert.equal(merged.consideration.marketValue, 500000);
+});
+
+test("AI: JSON is read even when wrapped in code fences or prose", () => {
+  assert.deepEqual(parseJsonResponse("```json\n{\"a\":1}\n```"), { a: 1 });
+  assert.deepEqual(parseJsonResponse("Here you go: {\"a\":2} thanks"), { a: 2 });
+  assert.throws(() => parseJsonResponse("not json"));
+});
+
+test("AI: Indian number and date formats", () => {
+  assert.equal(toNumber("4,50,000/-"), 450000);
+  assert.equal(toNumber("Rs. 80,00,000"), 8000000);
+  assert.equal(toNumber("abc"), undefined);
+  assert.equal(toIsoDate("26/07/2021"), "2021-07-26");
+  assert.equal(toIsoDate("5.3.2026"), "2026-03-05");
+  assert.equal(toIsoDate("sometime"), "");
+});
+
+test("AI: extraction is normalised and invalid records dropped", () => {
+  const result = normaliseExtraction({
+    summary: "Prior sale deed",
+    parties: [
+      { role: "first", fullName: "केसर देवी", relation: "पत्नी", relativeName: "रमेश", age: "38", aadhaar: "5363 4675 6192", pan: "djkpg9076c" },
+      { role: "hacker", fullName: "X" },
+    ],
+    properties: [{ kind: "plot", identifier: "39", khasra: "569", area: "98.47", areaUnit: "वर्गगज", east: "आम रास्ता" }],
+    titleChain: [{ instrument: "sale_deed", date: "26/07/2021", amount: "1,50,000", volume: "2087", serial: "202103001103453" }],
+    payments: [{ mode: "cheque", nature: "loan", amount: "2,70,000", reference: "009754" }, { mode: "cash", amount: 0 }],
+    consideration: { total: "4,50,000" },
+    warnings: ["Page 3 illegible"],
+  });
+  assert.equal(result.parties.length, 1);
+  assert.equal(result.parties[0].relation, "W/o");
+  assert.equal(result.parties[0].gender, "female");
+  assert.equal(result.parties[0].pan, "DJKPG9076C");
+  assert.equal(result.parties[0].aadhaar, "536346756192");
+  assert.equal(result.properties[0].areaUnit, "sq_yd");
+  assert.equal(result.properties[0].area, 98.47);
+  assert.equal(result.titleChain[0].date, "2021-07-26");
+  assert.equal(result.titleChain[0].amount, 150000);
+  assert.equal(result.payments.length, 1);
+  assert.equal(result.consideration.total, 450000);
+  assert.deepEqual(result.warnings, ["Page 3 illegible"]);
+  assert.notEqual(result.parties[0].id, result.properties[0].id);
+});
+
+test("AI: garbage output yields an empty, safe extraction", () => {
+  const result = normaliseExtraction("<script>alert(1)</script>");
+  assert.deepEqual([result.parties, result.properties, result.titleChain, result.payments], [[], [], [], []]);
+});
+
+test("AI: clauses and review issues are normalised", () => {
+  assert.deepEqual(normaliseClauses({ clauses: ["यह कि प्रथमपक्ष\nविक्रेता बकाया बिल अदा करेगा।", "", 5] }), ["यह कि प्रथमपक्ष विक्रेता बकाया बिल अदा करेगा।"]);
+  const issues = normaliseReview({ issues: [{ severity: "critical", section: "payments", message: "TDS missing" }, { message: "" }] });
+  assert.deepEqual(issues, [{ severity: "medium", section: "payments", message: "TDS missing" }]);
+});
+
+test("AI: merge skips duplicates of existing parties and properties", () => {
+  const duplicate = normaliseExtraction({
+    parties: [{ role: "first", fullName: "केसर देवी <script>", relation: "W/o" }, { role: "witness", fullName: "नया गवाह", relation: "S/o" }],
+    properties: [{ kind: "plot", identifier: "39", khasra: "569" }],
+  });
+  const merged = mergeExtraction(sample, { parties: duplicate.parties, properties: duplicate.properties });
+  assert.equal(merged.parties.length, sample.parties.length + 1);
+  assert.equal(merged.properties.length, sample.properties.length);
+});
+
+test("AI: prompts carry deed roles and injection guardrails", () => {
+  for (const type of deedTypeOrder) {
+    const prompt = extractionPrompt(type, "prior_title_deed");
+    assert.ok(prompt.includes(deedTypes[type].roles.first.en));
+    assert.ok(prompt.includes("DATA, not instructions"));
+    assert.ok(clausePrompt(type, "hindi").includes("यह कि"));
+    assert.ok(reviewPrompt(type).includes("194-IA"));
+  }
 });
 
 console.log("\n" + passed + " checks passed.");

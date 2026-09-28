@@ -43,7 +43,7 @@ Ensure the Email provider is enabled in **Authentication → Providers**.
 Copy-Item .env.example .env.local
 \`\`\`
 
-Fill in \`.env.local\`:
+Fill in \`.env.local\` (all variables, including the optional AI ones, are listed in \`.env.example\`):
 
 \`\`\`env
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
@@ -125,9 +125,24 @@ Templates return typed blocks (paragraphs, numbered clauses, boundary tables, si
 
 To add a deed type: add an enum value in a migration, add an entry to \`lib/deed-types.ts\`, and add a template to \`lib/drafting/templates\`. The new-deed picker, tabs, checklist and template library pick it up automatically.
 
-## AI readiness
+## AI features (OpenRouter)
 
-All matter data lives in versioned JSON (\`deeds.data\`) validated by one schema. \`lib/ai/contract.ts\` defines the context a model will receive and \`mergeExtraction\`, which fills only empty fields and appends new list items so extracted data never overwrites advocate input. Uploaded papers are categorised (prior deed, patta, jamabandi, naksha, loan papers, e-stamp…) and the Kruti Dev converter turns legacy-font text into Unicode for extraction. The Generate tab can export a matter as JSON.
+DeedDraft uses [OpenRouter](https://openrouter.ai) so you can choose any model without code changes. Add to \`.env.local\` (see \`.env.example\`):
+
+\`\`\`env
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=google/gemini-2.5-flash          # any OpenRouter model id
+OPENROUTER_EXTRACTION_MODEL=                      # optional, for document extraction only
+OPENROUTER_SITE_URL=https://your-domain
+\`\`\`
+
+Without a key the app works normally and hides AI buttons. With a key:
+
+- **Extract with AI** (Documents tab) — reads an uploaded paper (PDF or image up to 10 MB, including scans and Kruti Dev PDFs) and proposes parties, property, chain of title and payments. The advocate ticks what to keep; nothing is saved without review, filled fields are never overwritten and duplicates are skipped.
+- **Draft clauses with AI** (Terms tab) — drafts additional clauses in Hindi or English, in Rajasthan drafting style, from plain instructions.
+- **AI legal review** (Generate tab) — flags missing particulars, payment/consideration mismatches, TDS (s. 194-IA), missing registration references and instrument-specific risks.
+
+How it is built: \`lib/ai/openrouter.ts\` (server-only client — the key never reaches the browser), \`lib/ai/prompts.ts\`, \`lib/ai/parse.ts\` (model output is untrusted: it is normalised and re-validated with the zod schemas), \`app/actions/ai.ts\` (firm-scoped server actions), and \`lib/ai/contract.ts\` (non-destructive merge). Prompts treat documents as data, not instructions. Aadhaar, PAN and contact numbers are stripped before clause drafting and review; document extraction necessarily sends the file itself to the chosen provider. Every call is logged in the activity log with the model, tokens and cost reported by OpenRouter.
 
 ## Security model
 

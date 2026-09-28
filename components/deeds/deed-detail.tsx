@@ -14,6 +14,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Sparkles,
   UploadCloud,
   X,
 } from "lucide-react";
@@ -31,6 +32,8 @@ import {
   deleteDocument,
   recategorizeDocument,
 } from "@/app/actions/documents";
+import { extractFromDocument } from "@/app/actions/ai";
+import { ExtractionReview } from "@/components/deeds/ai/extraction-review";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
 import { DraftGenerator } from "@/components/deeds/draft-generator";
 import { PartiesSection } from "@/components/deeds/sections/parties";
@@ -53,6 +56,7 @@ import {
 } from "@/lib/deeds";
 import { getReadiness, paymentsTotal } from "@/lib/drafting";
 import { displayName } from "@/lib/drafting/format";
+import type { Extraction } from "@/lib/ai/parse";
 import type { DeedData } from "@/lib/schemas/deed-data";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, Deed } from "@/types/database";
@@ -91,7 +95,9 @@ export function DeedDetail({
   firmName,
   firmCity,
   initialData,
+  aiEnabled = false,
 }: {
+  aiEnabled?: boolean;
   deed: Deed;
   documents: Document[];
   activities: Activity[];
@@ -110,6 +116,21 @@ export function DeedDetail({
   const [savedState, setSavedState] = useState<"saved" | "saving" | "unsaved">("saved");
   const [pending, startTransition] = useTransition();
   const savedRemarks = useRef(deed.remarks ?? "");
+  const [extractingId, setExtractingId] = useState<string | null>(null);
+  const [extraction, setExtraction] = useState<{ result: Extraction; fileName: string } | null>(null);
+
+  const extract = (document: Document) => {
+    setExtractingId(document.id);
+    const toastId = toast.loading("Reading " + document.file_name + " with AI…");
+    void extractFromDocument({ deedId: deed.id, documentId: document.id })
+      .then((result) => {
+        if (result.error !== undefined) return toast.error(result.error, { id: toastId });
+        toast.success("Extraction ready for review.", { id: toastId });
+        setExtraction({ result: result.extraction, fileName: document.file_name });
+      })
+      .catch(() => toast.error("AI extraction failed. Please try again.", { id: toastId }))
+      .finally(() => setExtractingId(null));
+  };
   const readiness = getReadiness(deed.deed_type, data, documents.length);
   const readyCount = readiness.filter((item) => item.done).length;
   const counts: Partial<Record<SectionId, number>> = {
@@ -273,15 +294,30 @@ export function DeedDetail({
       {tab === "properties" ? <PropertiesSection deedType={deed.deed_type} parties={data.parties} properties={data.properties} save={saveSection} /> : null}
       {tab === "title" ? <TitleChainSection entries={data.titleChain} save={saveSection} /> : null}
       {tab === "payments" ? <PaymentsSection consideration={data.consideration} deedType={deed.deed_type} payments={data.payments} save={saveSection} /> : null}
-      {tab === "terms" ? <TermsSection deedType={deed.deed_type} execution={data.execution} firmCity={firmCity} save={saveSection} terms={data.terms} /> : null}
-      {tab === "documents" ? <DocumentsTab deedId={deed.id} documents={documents} firmId={firmId} /> : null}
+      {tab === "terms" ? <TermsSection aiEnabled={aiEnabled} deedId={deed.id} deedLanguage={deed.language} deedType={deed.deed_type} execution={data.execution} firmCity={firmCity} save={saveSection} terms={data.terms} /> : null}
+      {tab === "documents" ? <DocumentsTab aiEnabled={aiEnabled} deedId={deed.id} documents={documents} extractingId={extractingId} firmId={firmId} onExtract={extract} /> : null}
       {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">Client instructions and drafting notes. These will also guide AI drafting later.</p></div><span className={"shrink-0 text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
-      {tab === "generate" ? <DraftGenerator city={firmCity} data={data} firmName={firmName} language={deed.language} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      {tab === "generate" ? <DraftGenerator aiEnabled={aiEnabled} city={firmCity} deedId={deed.id} data={data} firmName={firmName} language={deed.language} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      {extraction ? <ExtractionReview data={data} deedType={deed.deed_type} extraction={extraction.result} fileName={extraction.fileName} onClose={() => setExtraction(null)} save={saveSection} /> : null}
     </div>
   );
 }
 
-function DocumentsTab({ deedId, documents, firmId }: { deedId: string; documents: Document[]; firmId: string }) {
+function DocumentsTab({
+  deedId,
+  documents,
+  firmId,
+  aiEnabled,
+  extractingId,
+  onExtract,
+}: {
+  deedId: string;
+  documents: Document[];
+  firmId: string;
+  aiEnabled: boolean;
+  extractingId: string | null;
+  onExtract: (document: Document) => void;
+}) {
   const [uploads, setUploads] = useState<UploadItem[]>([]);
   const [preview, setPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
   const [pending, startTransition] = useTransition();
@@ -342,7 +378,7 @@ function DocumentsTab({ deedId, documents, firmId }: { deedId: string; documents
 
   return (
     <section className="space-y-5">
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">AI extraction from documents — coming soon. Files remain securely stored in this matter repository.</div>
+      {aiEnabled ? <div className="flex gap-3 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent-foreground"><Sparkles className="mt-0.5 size-4 shrink-0" /><p>Use <strong>Extract with AI</strong> on any paper (sale deed, patta, jamabandi, loan letter, Kruti Dev or scanned PDFs up to 10 MB) to pull parties, property, chain of title and payments into this matter for your review. The file is sent to the configured AI provider via OpenRouter.</p></div> : <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">AI extraction is available once an OpenRouter API key is configured. Files remain securely stored in this matter repository.</div>}
       <div className="rounded-xl border border-dashed border-primary/30 bg-card p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div><h2 className="font-semibold text-primary">Upload supporting documents</h2><p className="mt-1 text-sm text-muted-foreground">PDF, JPG, or PNG · maximum 20 MB each.</p></div>
@@ -358,7 +394,7 @@ function DocumentsTab({ deedId, documents, firmId }: { deedId: string; documents
         {documents.length ? <div className="divide-y divide-border">{documentCategories.map((category) => {
           const group = documents.filter((document) => document.category === category);
           if (!group.length) return null;
-          return <div className="p-4 sm:p-5" key={category}><h3 className="text-sm font-semibold text-primary">{documentCategoryLabels[category]} <span className="text-muted-foreground">({group.length})</span></h3><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map((document) => <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-border p-3 sm:flex-nowrap" key={document.id}>{document.mime_type.startsWith("image/") ? <FileImage className="size-7 shrink-0 text-accent-foreground" /> : <FileText className="size-7 shrink-0 text-destructive" />}<div className="min-w-0 flex-1 basis-40"><p className="truncate text-sm font-medium text-primary">{document.file_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{Math.round(document.size_bytes / 1024)} KB · {format(new Date(document.created_at), "d MMM yyyy")}</p></div><select aria-label={"Category for " + document.file_name} className="h-8 max-w-36 flex-1 rounded-md border sm:flex-none border-border bg-background px-1 text-xs" disabled={pending} onChange={(event) => startTransition(() => void recategorizeDocument({ id: document.id, category: event.target.value }).then((result) => { if (result.error) toast.error(result.error); else toast.success("Category updated."); }))} value={document.category}>{documentCategories.map((value) => <option key={value} value={value}>{documentCategoryLabels[value]}</option>)}</select><button aria-label={"Preview " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary" onClick={() => openPreview(document)}><Download className="size-4" /></button><button aria-label={"Delete " + document.file_name} className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeDocument(document.id)}><Trash2 className="size-4" /></button></div>)}</div></div>;
+          return <div className="p-4 sm:p-5" key={category}><h3 className="text-sm font-semibold text-primary">{documentCategoryLabels[category]} <span className="text-muted-foreground">({group.length})</span></h3><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map((document) => <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-border p-3 sm:flex-nowrap" key={document.id}>{document.mime_type.startsWith("image/") ? <FileImage className="size-7 shrink-0 text-accent-foreground" /> : <FileText className="size-7 shrink-0 text-destructive" />}<div className="min-w-0 flex-1 basis-40"><p className="truncate text-sm font-medium text-primary">{document.file_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{Math.round(document.size_bytes / 1024)} KB · {format(new Date(document.created_at), "d MMM yyyy")}</p></div><select aria-label={"Category for " + document.file_name} className="h-8 max-w-36 flex-1 rounded-md border sm:flex-none border-border bg-background px-1 text-xs" disabled={pending} onChange={(event) => startTransition(() => void recategorizeDocument({ id: document.id, category: event.target.value }).then((result) => { if (result.error) toast.error(result.error); else toast.success("Category updated."); }))} value={document.category}>{documentCategories.map((value) => <option key={value} value={value}>{documentCategoryLabels[value]}</option>)}</select>{aiEnabled ? <button aria-label={"Extract details from " + document.file_name + " with AI"} className="rounded-md p-2 text-accent-foreground hover:bg-accent/15 disabled:opacity-40" disabled={extractingId !== null} onClick={() => onExtract(document)} title="Extract with AI">{extractingId === document.id ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}</button> : null}<button aria-label={"Preview " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary" onClick={() => openPreview(document)}><Download className="size-4" /></button><button aria-label={"Delete " + document.file_name} className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeDocument(document.id)}><Trash2 className="size-4" /></button></div>)}</div></div>;
         })}</div> : <EmptyPlaceholder description="Upload a title deed, jamabandi, ID proof, map, or payment record to keep it ready for review." title="No documents yet" />}
       </div>
       {preview ? <div className="fixed inset-0 z-50 grid place-items-center bg-primary/50 p-4"><div className="flex h-[85dvh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl"><div className="flex items-center justify-between border-b border-border px-4 py-3"><p className="truncate text-sm font-semibold text-primary">{preview.name}</p><div className="flex items-center gap-2"><a className="rounded-md px-2 py-1 text-sm font-semibold text-primary hover:bg-secondary" href={preview.url} rel="noreferrer" target="_blank">Download</a><button aria-label="Close preview" className="rounded-md p-2 hover:bg-secondary" onClick={() => setPreview(null)}><X className="size-4" /></button></div></div>{preview.mime.startsWith("image/") ? <div className="flex flex-1 items-center justify-center bg-secondary/50 p-4"><img alt={preview.name} className="max-h-full max-w-full object-contain" src={preview.url} /></div> : <iframe className="min-h-0 flex-1" src={preview.url} title={preview.name} />}</div></div> : null}

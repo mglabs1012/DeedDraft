@@ -1,12 +1,16 @@
 import { notFound } from "next/navigation";
 
 import { DeedDetail } from "@/components/deeds/deed-detail";
+import { isAiConfigured } from "@/lib/ai/openrouter";
 import { parseDeedData } from "@/lib/schemas/deed-data";
 import { getCurrentWorkspace } from "@/lib/workspace";
 import type { Database, Deed } from "@/types/database";
 
 type Document = Database["public"]["Tables"]["deed_documents"]["Row"];
 type Activity = Database["public"]["Tables"]["activity_log"]["Row"];
+
+// AI extraction of scanned papers can take a while.
+export const maxDuration = 120;
 
 export default async function DeedDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -23,6 +27,7 @@ export default async function DeedDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <DeedDetail
+      aiEnabled={isAiConfigured()}
       activities={(activityResult.data ?? []) as Activity[]}
       deed={deedResult.data as Deed}
       documents={(documentsResult.data ?? []) as Document[]}
