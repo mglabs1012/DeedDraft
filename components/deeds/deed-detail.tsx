@@ -2,8 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { format, formatDistanceToNow } from "date-fns";
+import Link from "next/link";
 import {
+  ArrowLeft,
   ArrowRight,
+  ChevronRight,
   CheckCircle2,
   Circle,
   Download,
@@ -14,6 +17,8 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Camera,
+  ScanText,
   Sparkles,
   UploadCloud,
   X,
@@ -32,7 +37,8 @@ import {
   deleteDocument,
   recategorizeDocument,
 } from "@/app/actions/documents";
-import { extractFromDocument } from "@/app/actions/ai";
+import { extractFromDocument, readDocumentText } from "@/app/actions/ai";
+import type { SavedDraft } from "@/app/actions/drafts";
 import { ExtractionReview } from "@/components/deeds/ai/extraction-review";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
 import { DraftGenerator } from "@/components/deeds/draft-generator";
@@ -43,6 +49,7 @@ import type { SaveSection } from "@/components/deeds/sections/shared";
 import { TermsSection } from "@/components/deeds/sections/terms";
 import { TitleChainSection } from "@/components/deeds/sections/title-chain";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { getDeedType, sectionsFor, type SectionId } from "@/lib/deed-types";
 import {
   activityLabel,
@@ -77,6 +84,10 @@ const sectionLabels: Record<SectionId, string> = {
   documents: "Documents",
 };
 
+function isTab(value: string, type: Deed["deed_type"]) {
+  return value === "overview" || value === "remarks" || value === "generate" || (sectionsFor(type) as string[]).includes(value);
+}
+
 function EmptyPlaceholder({ title, description }: { title: string; description: string }) {
   return (
     <div className="rounded-xl border border-dashed border-border bg-secondary/30 px-6 py-14 text-center">
@@ -96,8 +107,12 @@ export function DeedDetail({
   firmCity,
   initialData,
   aiEnabled = false,
+  initialTab,
+  initialDrafts = [],
 }: {
   aiEnabled?: boolean;
+  initialTab?: string;
+  initialDrafts?: SavedDraft[];
   deed: Deed;
   documents: Document[];
   activities: Activity[];
@@ -107,7 +122,17 @@ export function DeedDetail({
   initialData: DeedData;
 }) {
   const config = getDeedType(deed.deed_type);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTabState] = useState<Tab>(() => (initialTab && isTab(initialTab, deed.deed_type) ? (initialTab as Tab) : "overview"));
+  const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>(initialDrafts);
+  // Keep the active tab in the URL so refresh, Back and shared links land on the same section.
+  const setTab = useCallback((next: Tab) => {
+    setTabState(next);
+    const url = new URL(window.location.href);
+    if (next === "overview") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", next);
+    window.history.replaceState(window.history.state, "", url);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
   const [title, setTitle] = useState(deed.title);
   const [editingTitle, setEditingTitle] = useState(false);
   const [status, setStatus] = useState(deed.status);
@@ -216,6 +241,12 @@ export function DeedDetail({
 
   return (
     <div className="space-y-6">
+      <nav aria-label="Breadcrumb" className="-mb-2 flex items-center gap-1 text-sm text-muted-foreground">
+        <Link className="hover:text-primary hover:underline" href="/app/deeds">Deeds</Link>
+        <ChevronRight className="size-3.5" />
+        <span className="font-mono text-xs font-semibold text-primary">{deed.reference_no}</span>
+        {tab !== "overview" ? <><ChevronRight className="size-3.5" /><span className="text-primary">{tabs.find((item) => item.id === tab)?.label}</span></> : null}
+      </nav>
       <section className="rounded-xl border border-border bg-card px-4 pt-5 shadow-sm sm:px-6 sm:pt-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div className="min-w-0 flex-1">
@@ -297,7 +328,8 @@ export function DeedDetail({
       {tab === "terms" ? <TermsSection aiEnabled={aiEnabled} deedId={deed.id} deedLanguage={deed.language} deedType={deed.deed_type} execution={data.execution} firmCity={firmCity} save={saveSection} terms={data.terms} /> : null}
       {tab === "documents" ? <DocumentsTab aiEnabled={aiEnabled} deedId={deed.id} documents={documents} extractingId={extractingId} firmId={firmId} onExtract={extract} /> : null}
       {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">Client instructions and drafting notes. These will also guide AI drafting later.</p></div><span className={"shrink-0 text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
-      {tab === "generate" ? <DraftGenerator aiEnabled={aiEnabled} city={firmCity} deedId={deed.id} data={data} firmName={firmName} language={deed.language} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      {tab === "generate" ? <DraftGenerator aiEnabled={aiEnabled} onDraftSaved={(draft) => setSavedDrafts((current) => [draft, ...current])} savedDrafts={savedDrafts} city={firmCity} deedId={deed.id} data={data} firmName={firmName} language={deed.language} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      <StepNav current={tab} onGo={setTab} tabs={tabs} />
       {extraction ? <ExtractionReview data={data} deedType={deed.deed_type} extraction={extraction.result} fileName={extraction.fileName} onClose={() => setExtraction(null)} save={saveSection} /> : null}
     </div>
   );
@@ -322,12 +354,25 @@ function DocumentsTab({
   const [preview, setPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const [readingId, setReadingId] = useState<string | null>(null);
+  const [textView, setTextView] = useState<{ name: string; text: string; source: string; quality: string; pages: number | null } | null>(null);
+
+  const readText = (document: Document, force = false) => {
+    setReadingId(document.id);
+    void readDocumentText({ deedId, documentId: document.id, force })
+      .then((result) => {
+        if (result.error !== undefined) return void toast.error(result.error);
+        setTextView({ name: document.file_name, text: result.text, source: result.source, quality: result.quality, pages: result.pages });
+      })
+      .finally(() => setReadingId(null));
+  };
 
   const addFiles = (fileList: FileList | null) => {
     if (!fileList) return;
     const candidates = Array.from(fileList).filter((file) => {
-      const valid = ["application/pdf", "image/jpeg", "image/png"].includes(file.type) && file.size <= 20 * 1024 * 1024;
-      if (!valid) toast.error(file.name + " must be a PDF, JPG, or PNG under 20 MB.");
+      const valid = ACCEPTED_TYPES.includes(file.type) && file.size <= 20 * 1024 * 1024;
+      if (!valid) toast.error(file.name + " must be a PDF, Word (.docx), JPG, PNG or WebP file under 20 MB.");
       return valid;
     });
     setUploads((current) => current.concat(candidates.map((file) => ({ id: crypto.randomUUID(), file, category: "other", status: "ready" }))));
@@ -378,12 +423,12 @@ function DocumentsTab({
 
   return (
     <section className="space-y-5">
-      {aiEnabled ? <div className="flex gap-3 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent-foreground"><Sparkles className="mt-0.5 size-4 shrink-0" /><p>Use <strong>Extract with AI</strong> on any paper (sale deed, patta, jamabandi, loan letter, Kruti Dev or scanned PDFs up to 10 MB) to pull parties, property, chain of title and payments into this matter for your review. The file is sent to the configured AI provider via OpenRouter.</p></div> : <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">AI extraction is available once an OpenRouter API key is configured. Files remain securely stored in this matter repository.</div>}
+      <OcrGuide aiEnabled={aiEnabled} />
       <div className="rounded-xl border border-dashed border-primary/30 bg-card p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div><h2 className="font-semibold text-primary">Upload supporting documents</h2><p className="mt-1 text-sm text-muted-foreground">PDF, JPG, or PNG · maximum 20 MB each.</p></div>
+          <div><h2 className="font-semibold text-primary">Upload supporting documents</h2><p className="mt-1 text-sm text-muted-foreground">PDF, Word (.docx), JPG, PNG or WebP · maximum 20 MB each.</p></div>
           <Button onClick={() => fileInput.current?.click()} type="button" variant="outline"><Plus className="size-4" /> Choose files</Button>
-          <input accept=".pdf,image/jpeg,image/png" className="hidden" multiple onChange={(event) => addFiles(event.target.files)} ref={fileInput} type="file" />
+          <input accept=".pdf,.docx,image/jpeg,image/png,image/webp" className="hidden" multiple onChange={(event) => addFiles(event.target.files)} ref={fileInput} type="file" /><input accept="image/*" capture="environment" className="hidden" onChange={(event) => addFiles(event.target.files)} ref={cameraInput} type="file" /><Button className="sm:hidden" onClick={() => cameraInput.current?.click()} type="button" variant="outline"><Camera className="size-4" /> Take photo</Button>
         </div>
         <button className="mt-5 flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 py-8 text-center hover:bg-secondary/40" onClick={() => fileInput.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); addFiles(event.dataTransfer.files); }} type="button"><UploadCloud className="size-7 text-accent-foreground" /><span className="mt-3 text-sm font-semibold text-primary">Drag files here or choose from your computer</span><span className="mt-1 text-xs text-muted-foreground">Files are kept private to this firm and matter.</span></button>
         {uploads.length ? <div className="mt-5 space-y-2">{uploads.map((upload) => <div className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center" key={upload.id}><FileText className="size-5 text-muted-foreground" /><p className="min-w-0 flex-1 truncate text-sm font-medium">{upload.file.name}</p><select className={inputClass + " w-full sm:w-44"} disabled={upload.status !== "ready" && upload.status !== "error"} onChange={(event) => updateUpload(upload.id, { category: event.target.value as DocumentCategory })} value={upload.category}>{documentCategories.map((category) => <option key={category} value={category}>{documentCategoryLabels[category]}</option>)}</select><span className={"text-xs font-semibold " + (upload.status === "complete" ? "text-emerald-700" : upload.status === "error" ? "text-destructive" : upload.status === "uploading" ? "text-amber-700" : "text-muted-foreground")}>{upload.status === "uploading" ? "Uploading…" : upload.status === "complete" ? "Uploaded" : upload.status === "error" ? "Retry" : "Ready"}</span><button aria-label={"Remove " + upload.file.name} className="p-1 text-muted-foreground hover:text-destructive" disabled={upload.status === "uploading"} onClick={() => setUploads((current) => current.filter((item) => item.id !== upload.id))} type="button"><X className="size-4" /></button></div>)}</div> : null}
@@ -394,10 +439,80 @@ function DocumentsTab({
         {documents.length ? <div className="divide-y divide-border">{documentCategories.map((category) => {
           const group = documents.filter((document) => document.category === category);
           if (!group.length) return null;
-          return <div className="p-4 sm:p-5" key={category}><h3 className="text-sm font-semibold text-primary">{documentCategoryLabels[category]} <span className="text-muted-foreground">({group.length})</span></h3><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map((document) => <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-border p-3 sm:flex-nowrap" key={document.id}>{document.mime_type.startsWith("image/") ? <FileImage className="size-7 shrink-0 text-accent-foreground" /> : <FileText className="size-7 shrink-0 text-destructive" />}<div className="min-w-0 flex-1 basis-40"><p className="truncate text-sm font-medium text-primary">{document.file_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{Math.round(document.size_bytes / 1024)} KB · {format(new Date(document.created_at), "d MMM yyyy")}</p></div><select aria-label={"Category for " + document.file_name} className="h-8 max-w-36 flex-1 rounded-md border sm:flex-none border-border bg-background px-1 text-xs" disabled={pending} onChange={(event) => startTransition(() => void recategorizeDocument({ id: document.id, category: event.target.value }).then((result) => { if (result.error) toast.error(result.error); else toast.success("Category updated."); }))} value={document.category}>{documentCategories.map((value) => <option key={value} value={value}>{documentCategoryLabels[value]}</option>)}</select>{aiEnabled ? <button aria-label={"Extract details from " + document.file_name + " with AI"} className="rounded-md p-2 text-accent-foreground hover:bg-accent/15 disabled:opacity-40" disabled={extractingId !== null} onClick={() => onExtract(document)} title="Extract with AI">{extractingId === document.id ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}</button> : null}<button aria-label={"Preview " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary" onClick={() => openPreview(document)}><Download className="size-4" /></button><button aria-label={"Delete " + document.file_name} className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeDocument(document.id)}><Trash2 className="size-4" /></button></div>)}</div></div>;
+          return <div className="p-4 sm:p-5" key={category}><h3 className="text-sm font-semibold text-primary">{documentCategoryLabels[category]} <span className="text-muted-foreground">({group.length})</span></h3><div className="mt-3 grid gap-3 md:grid-cols-2">{group.map((document) => <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-lg border border-border p-3 sm:flex-nowrap" key={document.id}>{document.mime_type.startsWith("image/") ? <FileImage className="size-7 shrink-0 text-accent-foreground" /> : <FileText className="size-7 shrink-0 text-destructive" />}<div className="min-w-0 flex-1 basis-40"><p className="truncate text-sm font-medium text-primary">{document.file_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{Math.round(document.size_bytes / 1024)} KB · {format(new Date(document.created_at), "d MMM yyyy")}</p><TextStatus document={document} /></div><select aria-label={"Category for " + document.file_name} className="h-8 max-w-36 flex-1 rounded-md border sm:flex-none border-border bg-background px-1 text-xs" disabled={pending} onChange={(event) => startTransition(() => void recategorizeDocument({ id: document.id, category: event.target.value }).then((result) => { if (result.error) toast.error(result.error); else toast.success("Category updated."); }))} value={document.category}>{documentCategories.map((value) => <option key={value} value={value}>{documentCategoryLabels[value]}</option>)}</select><button aria-label={"Read text of " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary disabled:opacity-40" disabled={readingId !== null} onClick={() => readText(document)} title={document.text_source ? "View text" : "Read text (OCR)"} type="button">{readingId === document.id ? <LoaderCircle className="size-4 animate-spin" /> : <ScanText className="size-4" />}</button>{aiEnabled ? <button aria-label={"Extract details from " + document.file_name + " with AI"} className="rounded-md p-2 text-accent-foreground hover:bg-accent/15 disabled:opacity-40" disabled={extractingId !== null} onClick={() => onExtract(document)} title="Extract with AI">{extractingId === document.id ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}</button> : null}<button aria-label={"Preview " + document.file_name} className="rounded-md p-2 text-primary hover:bg-secondary" onClick={() => openPreview(document)}><Download className="size-4" /></button><button aria-label={"Delete " + document.file_name} className="rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={() => removeDocument(document.id)}><Trash2 className="size-4" /></button></div>)}</div></div>;
         })}</div> : <EmptyPlaceholder description="Upload a title deed, jamabandi, ID proof, map, or payment record to keep it ready for review." title="No documents yet" />}
       </div>
+      {textView ? (
+        <Modal className="sm:max-w-3xl" description={textSourceLabels[textView.source] + (textView.pages ? " · " + textView.pages + " page(s)" : "") + (textView.quality === "poor" ? " · low quality" : "")} footer={<><Button className="h-10" onClick={() => void navigator.clipboard.writeText(textView.text).then(() => toast.success("Copied."))} type="button" variant="outline">Copy text</Button>{aiEnabled ? <Button className="h-10" onClick={() => { const doc = documents.find((item) => item.file_name === textView.name); setTextView(null); if (doc) readText(doc, true); }} type="button" variant="outline">Read again with AI OCR</Button> : null}<Button className="h-10" onClick={() => setTextView(null)} type="button">Close</Button></>} onClose={() => setTextView(null)} open title={textView.name}>
+          {textView.quality === "poor" ? <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">This text looks incomplete or garbled. Re-scan at 300 dpi, or read again with AI OCR.</p> : null}
+          <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-secondary/50 p-3 font-devanagari text-sm leading-7">{textView.text || "No text found."}</pre>
+        </Modal>
+      ) : null}
       {preview ? <div className="fixed inset-0 z-50 grid place-items-center bg-primary/50 p-4"><div className="flex h-[85dvh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-card shadow-2xl"><div className="flex items-center justify-between border-b border-border px-4 py-3"><p className="truncate text-sm font-semibold text-primary">{preview.name}</p><div className="flex items-center gap-2"><a className="rounded-md px-2 py-1 text-sm font-semibold text-primary hover:bg-secondary" href={preview.url} rel="noreferrer" target="_blank">Download</a><button aria-label="Close preview" className="rounded-md p-2 hover:bg-secondary" onClick={() => setPreview(null)}><X className="size-4" /></button></div></div>{preview.mime.startsWith("image/") ? <div className="flex flex-1 items-center justify-center bg-secondary/50 p-4"><img alt={preview.name} className="max-h-full max-w-full object-contain" src={preview.url} /></div> : <iframe className="min-h-0 flex-1" src={preview.url} title={preview.name} />}</div></div> : null}
     </section>
+  );
+}
+
+/** Previous / next step buttons that walk the advocate through the matter in order. */
+function StepNav({ tabs, current, onGo }: { tabs: Array<{ id: string; label: string }>; current: string; onGo: (tab: never) => void }) {
+  const index = tabs.findIndex((item) => item.id === current);
+  if (index < 0) return null;
+  const previous = tabs[index - 1];
+  const next = tabs[index + 1];
+  return (
+    <nav aria-label="Matter steps" className="flex items-center justify-between gap-3 border-t border-border pt-5">
+      {previous ? (
+        <Button className="h-10" onClick={() => onGo(previous.id as never)} type="button" variant="outline"><ArrowLeft className="size-4" /> <span className="hidden sm:inline">{previous.label}</span><span className="sm:hidden">Back</span></Button>
+      ) : <span />}
+      <span className="text-xs text-muted-foreground">Step {index + 1} of {tabs.length}</span>
+      {next ? (
+        <Button className="h-10" onClick={() => onGo(next.id as never)} type="button"><span className="hidden sm:inline">Next: {next.label}</span><span className="sm:hidden">Next</span> <ArrowRight className="size-4" /></Button>
+      ) : <span />}
+    </nav>
+  );
+}
+
+const ACCEPTED_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+
+const textSourceLabels: Record<string, string> = {
+  "pdf-text": "Read from PDF text layer",
+  "pdf-text-krutidev": "PDF text · Kruti Dev converted to Unicode",
+  docx: "Read from Word file",
+  "docx-krutidev": "Word file · Kruti Dev converted to Unicode",
+  "ai-ocr": "Read by AI OCR",
+};
+
+function TextStatus({ document }: { document: Document }) {
+  if (!document.text_source) return <p className="mt-1 text-[11px] text-muted-foreground">Text not read yet</p>;
+  const poor = document.text_quality === "poor";
+  return (
+    <p className={"mt-1 inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold " + (poor ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700")}>
+      {poor ? "Low-quality text" : textSourceLabels[document.text_source] ?? "Text ready"}
+    </p>
+  );
+}
+
+function OcrGuide({ aiEnabled }: { aiEnabled: boolean }) {
+  return (
+    <details className="group rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent-foreground">
+      <summary className="flex cursor-pointer list-none items-start gap-3">
+        <Sparkles className="mt-0.5 size-4 shrink-0" />
+        <span className="flex-1">
+          {aiEnabled ? (
+            <>Upload the property papers first. <strong>Read text</strong> converts Kruti Dev and reads scans; <strong>Extract with AI</strong> fills parties, property, title and payments for your review.</>
+          ) : (
+            <>Upload the property papers. Text-based PDFs and Word files (including Kruti Dev) can be read now; scans and photos need AI OCR (configure OpenRouter).</>
+          )}
+          <span className="ml-1 font-semibold underline group-open:hidden">Scanning tips</span>
+        </span>
+      </summary>
+      <ul className="mt-3 list-disc space-y-1 pl-10 text-xs leading-5">
+        <li>Upload the original PDF from the drafting computer whenever possible — it is read instantly, free and exactly.</li>
+        <li>Scans: 300 dpi, greyscale, one document per file, pages upright and in order. Avoid photos of a screen.</li>
+        <li>Phone photos: flat surface, daylight, no shadows or fingers, whole page in frame, one page per photo.</li>
+        <li>Stamps, handwriting and faint carbon copies reduce accuracy — always check names, amounts, khasra and registration numbers.</li>
+        <li>Choose the right category (prior deed, patta, jamabandi…) so the AI knows what the paper is.</li>
+      </ul>
+    </details>
   );
 }

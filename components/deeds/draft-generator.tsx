@@ -1,13 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Braces, CheckCircle2, Circle, FileDown, Printer, Stamp } from "lucide-react";
+import { Braces, CheckCircle2, Circle, Eye, FileDown, PenLine, Printer, Stamp } from "lucide-react";
 
+import type { SavedDraft } from "@/app/actions/drafts";
 import { DeedReview } from "@/components/deeds/ai/deed-review";
+import { DraftStudio } from "@/components/deeds/draft-studio";
 import { Button } from "@/components/ui/button";
-import type { DeedType, SectionId } from "@/lib/deed-types";
+import { getDeedType, type DeedType, type DraftLanguage, type SectionId } from "@/lib/deed-types";
 import type { DeedLanguage, DeedStatus } from "@/lib/deeds";
-import { buildDraft, defaultDraftChoice, draftChoices, type DraftChoice, type ReadinessItem } from "@/lib/drafting";
+import { buildDraft, defaultDraftChoice, draftChoices, generateEditable, type DraftChoice, type EditableDraft, type ReadinessItem } from "@/lib/drafting";
+import { editableDraftSchema } from "@/lib/drafting/editable";
 import type { DeedData } from "@/lib/schemas/deed-data";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +29,8 @@ type Props = {
   onMarkGenerated: () => void;
   onJump: (tab: SectionId) => void;
   pending: boolean;
+  savedDrafts?: SavedDraft[];
+  onDraftSaved?: (draft: SavedDraft) => void;
 };
 
 const choiceLabels: Record<DraftChoice, string> = { hindi: "हिंदी", english: "English", both: "Both" };
@@ -41,10 +46,31 @@ function download(content: BlobPart[], type: string, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, language, data, firmName, city, readiness, status, onMarkGenerated, onJump, pending }: Props) {
+export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, language, data, firmName, city, readiness, status, onMarkGenerated, onJump, pending, savedDrafts = [], onDraftSaved }: Props) {
   const choices = draftChoices(type);
   const [choice, setChoice] = useState<DraftChoice>(() => defaultDraftChoice(type, language));
-  const { html } = useMemo(() => buildDraft({ type, title, referenceNo, data, firmName, firmCity: city }, choice), [type, title, referenceNo, data, firmName, city, choice]);
+  const [mode, setMode] = useState<"preview" | "edit">("preview");
+  const [useEdited, setUseEdited] = useState(true);
+  const input = useMemo(() => ({ type, title, referenceNo, data, firmName, firmCity: city }), [type, title, referenceNo, data, firmName, city]);
+  const latest = useMemo(() => {
+    const result: Partial<Record<DraftLanguage, { draft: EditableDraft; version: number }>> = {};
+    for (const saved of [...savedDrafts].sort((a, b) => b.version - a.version)) {
+      if (result[saved.language]) continue;
+      const parsed = editableDraftSchema.safeParse(saved.content);
+      if (parsed.success) result[saved.language] = { draft: parsed.data as EditableDraft, version: saved.version };
+    }
+    return result;
+  }, [savedDrafts]);
+  const overrides = useMemo(
+    () => (useEdited ? Object.fromEntries(Object.entries(latest).map(([key, value]) => [key, value!.draft])) : {}) as Partial<Record<DraftLanguage, EditableDraft>>,
+    [latest, useEdited],
+  );
+  const editedNote = Object.entries(latest).map(([key, value]) => (key === "hindi" ? "हिंदी" : "English") + " v" + value!.version).join(", ");
+  const { html } = useMemo(() => buildDraft(input, choice, overrides), [input, choice, overrides]);
+  const generators = useMemo(
+    () => Object.fromEntries(getDeedType(type).languages.map((item) => [item, () => generateEditable(input, item)])) as Record<DraftLanguage, () => EditableDraft>,
+    [input, type],
+  );
   const missing = readiness.filter((item) => !item.optional && !item.done);
 
   const print = () => {
@@ -65,7 +91,33 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
     download([JSON.stringify({ referenceNo, type, title, language, data }, null, 2)], "application/json", referenceNo + ".json");
   };
 
+  const toggle = (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="inline-flex rounded-lg border border-border bg-card p-1 text-sm font-semibold shadow-sm" role="tablist">
+        <button aria-selected={mode === "preview"} className={cn("inline-flex items-center gap-1.5 rounded-md px-3 py-1.5", mode === "preview" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-primary")} onClick={() => setMode("preview")} role="tab" type="button"><Eye className="size-4" /> Preview & export</button>
+        <button aria-selected={mode === "edit"} className={cn("inline-flex items-center gap-1.5 rounded-md px-3 py-1.5", mode === "edit" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-primary")} onClick={() => setMode("edit")} role="tab" type="button"><PenLine className="size-4" /> Edit{aiEnabled ? " & chat with AI" : " draft"}</button>
+      </div>
+      {editedNote ? (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input checked={useEdited} className="size-4 accent-[var(--primary)]" onChange={(event) => setUseEdited(event.target.checked)} type="checkbox" />
+          Use edited version ({editedNote})
+        </label>
+      ) : null}
+    </div>
+  );
+
+  if (mode === "edit" && deedId) {
+    return (
+      <div className="space-y-4">
+        {toggle}
+        <DraftStudio aiEnabled={Boolean(aiEnabled)} deedId={deedId} generated={generators} languages={getDeedType(type).languages} onSaved={(draft) => onDraftSaved?.(draft)} saved={savedDrafts} />
+      </div>
+    );
+  }
+
   return (
+    <div className="space-y-4">
+    {deedId ? toggle : null}
     <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="space-y-6">
         <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
@@ -119,6 +171,7 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
         </div>
         <iframe className="h-[70vh] min-h-[480px] w-full bg-white sm:h-[80vh]" sandbox="allow-same-origin" srcDoc={html} title="Draft preview" />
       </section>
+    </div>
     </div>
   );
 }

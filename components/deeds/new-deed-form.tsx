@@ -53,7 +53,7 @@ export function NewDeedForm({ initialType }: { initialType?: DeedType }) {
         if (result.error) return toast.error(result.error);
         if (result.id) {
           toast.success("Deed created.");
-          router.push("/app/deeds/" + result.id);
+          router.push("/app/deeds/" + result.id + "?tab=documents");
           router.refresh();
         }
       });

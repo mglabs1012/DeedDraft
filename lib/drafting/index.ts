@@ -3,6 +3,7 @@ import type { DeedData } from "@/lib/schemas/deed-data";
 
 import { renderDraftHtml, type Block, type DraftDocument } from "./blocks";
 import { createContext, paymentsTotal, type Ctx, type DraftInput } from "./common";
+import { fromEditable, toEditable, type EditableDraft } from "./editable";
 import { agreementToSell } from "./templates/agreement";
 import { genericDeed, partitionDeed, releaseDeed, willDeed } from "./templates/family";
 import { giftDeed } from "./templates/gift";
@@ -13,6 +14,7 @@ export { paymentsTotal } from "./common";
 export { rentSchedule } from "./templates/tenancy";
 export type { DraftInput } from "./common";
 export type { Block, DraftDocument } from "./blocks";
+export type { EditableBlock, EditableDraft } from "./editable";
 
 const templates: Record<DeedType, (ctx: Ctx) => Block[]> = {
   sale: saleDeed,
@@ -41,13 +43,21 @@ export function defaultDraftChoice(type: DeedType, language: "english" | "hindi"
   return choices[0];
 }
 
-export function buildDraftDocuments(input: DraftInput, choice: DraftChoice): DraftDocument[] {
+export function buildDraftDocuments(input: DraftInput, choice: DraftChoice, overrides: Partial<Record<DraftLanguage, EditableDraft>> = {}): DraftDocument[] {
   const languages: DraftLanguage[] = choice === "both" ? getDeedType(input.type).languages : [choice];
-  return languages.map((language) => ({ language, blocks: templates[input.type](createContext(input, language)) }));
+  return languages.map((language) => {
+    const edited = overrides[language];
+    return edited ? fromEditable(edited) : { language, blocks: templates[input.type](createContext(input, language)) };
+  });
 }
 
-export function buildDraft(input: DraftInput, choice: DraftChoice) {
-  const documents = buildDraftDocuments(input, choice);
+/** Freshly generated, editable version of the draft for one language. */
+export function generateEditable(input: DraftInput, language: DraftLanguage): EditableDraft {
+  return toEditable({ language, blocks: templates[input.type](createContext(input, language)) });
+}
+
+export function buildDraft(input: DraftInput, choice: DraftChoice, overrides: Partial<Record<DraftLanguage, EditableDraft>> = {}) {
+  const documents = buildDraftDocuments(input, choice, overrides);
   return {
     documents,
     html: renderDraftHtml({
