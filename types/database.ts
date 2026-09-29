@@ -38,9 +38,19 @@ export type Database = {
         { id?: string; firm_id?: string; deed_type?: Database["public"]["Enums"]["deed_type"]; title?: string; reference_no?: string; language?: Database["public"]["Enums"]["deed_language"]; status?: Database["public"]["Enums"]["deed_status"]; data?: Json; remarks?: string | null; created_by?: string; created_at?: string; updated_at?: string }
       >;
       deed_documents: Table<
-        { id: string; deed_id: string; firm_id: string; category: Database["public"]["Enums"]["document_category"]; file_name: string; storage_path: string; mime_type: string; size_bytes: number; uploaded_by: string; created_at: string },
-        { id?: string; deed_id: string; firm_id: string; category?: Database["public"]["Enums"]["document_category"]; file_name: string; storage_path: string; mime_type: string; size_bytes: number; uploaded_by: string; created_at?: string },
-        { id?: string; deed_id?: string; firm_id?: string; category?: Database["public"]["Enums"]["document_category"]; file_name?: string; storage_path?: string; mime_type?: string; size_bytes?: number; uploaded_by?: string; created_at?: string }
+        { id: string; deed_id: string; firm_id: string; category: Database["public"]["Enums"]["document_category"]; file_name: string; storage_path: string; mime_type: string; size_bytes: number; uploaded_by: string; created_at: string; extracted_text?: string | null; text_source?: string | null; text_quality?: string | null; page_count?: number | null; processed_at?: string | null },
+        { id?: string; deed_id: string; firm_id: string; category?: Database["public"]["Enums"]["document_category"]; file_name: string; storage_path: string; mime_type: string; size_bytes: number; uploaded_by: string; created_at?: string; extracted_text?: string | null; text_source?: string | null; text_quality?: string | null; page_count?: number | null; processed_at?: string | null },
+        { id?: string; deed_id?: string; firm_id?: string; category?: Database["public"]["Enums"]["document_category"]; file_name?: string; storage_path?: string; mime_type?: string; size_bytes?: number; uploaded_by?: string; created_at?: string; extracted_text?: string | null; text_source?: string | null; text_quality?: string | null; page_count?: number | null; processed_at?: string | null }
+      >;
+      deed_drafts: Table<
+        { id: string; deed_id: string; firm_id: string; language: "hindi" | "english"; version: number; content: Json; note: string | null; created_by: string; created_at: string },
+        { id?: string; deed_id: string; firm_id: string; language: "hindi" | "english"; version: number; content: Json; note?: string | null; created_by: string; created_at?: string },
+        { id?: string; deed_id?: string; firm_id?: string; language?: "hindi" | "english"; version?: number; content?: Json; note?: string | null; created_by?: string; created_at?: string }
+      >;
+      deed_ai_messages: Table<
+        { id: string; deed_id: string; firm_id: string; user_id: string; role: "user" | "assistant"; content: string; meta: Json; created_at: string },
+        { id?: string; deed_id: string; firm_id: string; user_id: string; role: "user" | "assistant"; content: string; meta?: Json; created_at?: string },
+        { id?: string; deed_id?: string; firm_id?: string; user_id?: string; role?: "user" | "assistant"; content?: string; meta?: Json; created_at?: string }
       >;
       activity_log: Table<
         { id: string; firm_id: string; deed_id: string | null; user_id: string; action: string; details: Json; created_at: string },

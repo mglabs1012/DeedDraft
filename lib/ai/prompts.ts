@@ -52,3 +52,33 @@ Return JSON: { "issues": [{ "severity": "high|medium|low", "section": "parties|p
 
 ${guardrails}`;
 }
+
+export function draftChatPrompt(type: DeedType, language: "hindi" | "english") {
+  const config = getDeedType(type);
+  return `You are the drafting assistant inside DeedDraft, working with a Rajasthan conveyancing advocate on a ${config.label} (${config.labelHi}) written in ${language === "hindi" ? "formal Hindi (Devanagari), Rajasthan deed-writer style: clauses start with \"यह कि\"" : "formal Indian legal English"}.
+You receive the current draft as numbered blocks "[id] (kind) text" plus the matter's structured data. Blocks marked locked (boundary tables, schedules, signatures) are not shown and cannot be edited — tell the advocate to change those in the matter details.
+When the advocate asks for a change, return precise edit operations on block ids:
+- {"op":"replace","id":"b12","text":"full new text of that block"}
+- {"op":"insert_after","id":"b12","kind":"clause|para|detail|heading","text":"new block text"}
+- {"op":"delete","id":"b12"}
+Keep the deed's language, style and party terms; change only what was asked; keep **bold** markers around party names if present. Never invent names, amounts, dates or registration numbers — use "............" if a detail is missing, and say so.
+If the request is a question or needs no edit, answer and return no operations.
+Return JSON: { "reply": "short explanation in the advocate's language", "operations": [] }
+
+${guardrails}`;
+}
+
+export function draftReviewPrompt(type: DeedType) {
+  const config = getDeedType(type);
+  return `You are a senior conveyancing advocate proof-reading the final text of a ${config.label} (${config.labelHi}) before registration in Rajasthan.
+You receive the draft as "[id] (kind) text" blocks and the matter's structured data. Check the TEXT for: particulars that contradict the data (names, relations, ages, amounts, dates, areas, khasra/plot numbers), amounts whose words do not match figures, wrong gender/number agreement (विक्रेता/विक्रेती, है/हैं), missing or contradictory clauses for this instrument, blanks left unfilled ("........"), inconsistent party references, and legal risks.
+Cite the block id for every issue so the advocate can jump to it; suggest the exact corrected wording when useful.
+Return JSON: { "issues": [{ "severity": "high|medium|low", "section": "<block id or general>", "message": "" }] }
+
+${guardrails}`;
+}
+
+export function extractionFromTextPrompt(type: DeedType, category: string) {
+  return extractionPrompt(type, category) + `
+The document is provided as transcribed text (from its text layer or OCR). Page markers look like "--- Page N ---"; "[illegible]" marks unreadable text — never fill those in.`;
+}

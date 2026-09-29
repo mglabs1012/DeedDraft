@@ -18,7 +18,7 @@ export const createDocumentSchema = z.object({
   category: documentCategorySchema,
   fileName: z.string().trim().min(1).max(255),
   storagePath: z.string().trim().min(1).max(1024),
-  mimeType: z.enum(["application/pdf", "image/jpeg", "image/png"]),
+  mimeType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]),
   sizeBytes: z.number().int().positive().max(20 * 1024 * 1024),
 });
 

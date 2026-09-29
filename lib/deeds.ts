@@ -173,6 +173,10 @@ export const activityLabels: Record<string, string> = {
   seeded_demo_deed: "Demo deed added",
   ai_extracted_document: "AI extracted a document",
   ai_drafted_clauses: "AI drafted clauses",
+  ai_read_document: "AI read a document (OCR)",
+  ai_chat_draft: "Edited the draft with AI chat",
+  ai_reviewed_draft: "AI reviewed the draft",
+  saved_draft_version: "Saved a draft version",
   ai_reviewed_deed: "AI reviewed the matter",
 };
 
