@@ -33,7 +33,7 @@ export function builtInReferences(): Promise<BuiltInReference[]> {
 
 const missingTable = (error: { code?: string; message?: string } | null) => Boolean(error && (error.code === "42P01" || error.code === "PGRST205" || /ai_memory/.test(error.message ?? "")));
 
-/** All memory rows of the firm. `available` is false until migration 0004 has been run. */
+/** All memory rows of the firm. `available` is false until migration 202610100005 has been run. */
 export async function loadFirmMemory(workspace: Workspace, { enabledOnly = true } = {}): Promise<FirmMemory> {
   let query = workspace.supabase.from("ai_memory").select("*").eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }).limit(200);
   if (enabledOnly) query = query.eq("enabled", true);

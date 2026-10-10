@@ -9,9 +9,12 @@ import { mergeExtraction } from "../lib/ai/contract";
 import { normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, parseJsonResponse, toIsoDate, toNumber } from "../lib/ai/parse";
 import { clausePrompt, extractionPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "../lib/ai/prompts";
 import { deedTypeOrder, deedTypes } from "../lib/deed-types";
-import { buildDraft, buildDraftDocuments, draftChoices, getReadiness, rentSchedule } from "../lib/drafting";
+import { buildDraft, buildDraftDocuments, draftChoices, generateEditable, getReadiness, rentSchedule } from "../lib/drafting";
+import { clauseLibrary } from "../lib/drafting/clause-library";
+import { applyOperations, draftForAi, editableDraftSchema, markupToHtml, validOperations } from "../lib/drafting/editable";
 import { areaTriple, hindiTerm, moneyHi } from "../lib/drafting/format";
 import { hindiLongDate, hindiWords, termEndDate } from "../lib/drafting/hindi";
+import { assessPages, assessText } from "../lib/ocr/quality";
 import { parseDeedData, type DeedData, type Party } from "../lib/schemas/deed-data";
 import { estimateStampDuty } from "../lib/stamp-duty";
 import { krutiDevToUnicode, looksLikeKrutiDev } from "../lib/text/krutidev";
@@ -392,6 +395,61 @@ test("Redaction: identity numbers become tokens and come back unchanged", () => 
   assert.ok(!hidden.includes("5363") && !hidden.includes("DJKPG9076C") && !hidden.includes("9876543210"));
   assert.ok(hidden.includes("450000"), "amounts are not identity numbers");
   assert.equal(redactor.restore(hidden), text);
+});
+
+test("Editable draft round-trips to the same output", () => {
+  for (const type of deedTypeOrder) {
+    for (const language of deedTypes[type].languages) {
+      const input = { type, title: "Test", referenceNo: "DD-2026-0001", data: sample, firmName: "Firm", firmCity: "Ajmer" };
+      const editable = generateEditable(input, language);
+      assert.ok(editableDraftSchema.safeParse(editable).success, type + " " + language + " fits the save schema");
+      // Template literals keep raw ' and & that the editor escapes; both render the same.
+      const html = (overrides = {}) => buildDraft(input, language, overrides).html.replaceAll("&#39;", "'").replaceAll("&amp;", "&");
+      assert.equal(html({ [language]: editable }), html(), type + " " + language);
+    }
+  }
+});
+
+test("Draft edits: only valid operations on editable blocks apply", () => {
+  const draft = generateEditable({ type: "sale", title: "T", referenceNo: "R", data: sample, firmName: "F", firmCity: "Ajmer" }, "hindi");
+  const clause = draft.blocks.find((block) => block.kind === "clause")!;
+  const locked = draft.blocks.find((block) => block.kind === "locked")!;
+  assert.ok(draftForAi(draft).includes("[" + clause.id + "]"));
+  const ops = validOperations(draft, [
+    { op: "replace", id: clause.id, text: "यह कि **नया** खण्ड।" },
+    { op: "insert_after", id: clause.id, text: "यह कि जोड़ा गया खण्ड।" },
+    { op: "replace", id: locked.id, text: "x" },
+    { op: "delete", id: "missing" },
+    { op: "drop_table" },
+  ]);
+  assert.equal(ops.length, 2);
+  const edited = applyOperations(draft, ops);
+  assert.equal(edited.blocks.length, draft.blocks.length + 1);
+  const index = edited.blocks.findIndex((block) => block.id === clause.id);
+  assert.equal((edited.blocks[index] as { text: string }).text, "यह कि **नया** खण्ड।");
+  assert.equal((edited.blocks[index + 1] as { text: string }).text, "यह कि जोड़ा गया खण्ड।");
+});
+
+test("Draft markup escapes HTML and keeps bold", () => {
+  assert.equal(markupToHtml("a **<b>** <script>").value, "a <strong>&lt;b&gt;</strong> &lt;script&gt;");
+});
+
+test("OCR quality: scans, broken glyphs and clean text", () => {
+  const clean = "यह कि विक्रेता उक्त भूखण्ड का एकमात्र स्वामी है तथा इसे विक्रय करने का पूर्ण अधिकार रखता है। ".repeat(6);
+  assert.equal(assessText(clean), "good");
+  assert.equal(assessText("   "), "poor");
+  assert.equal(assessText("वि न ां क ि  प ा ल ि क ा ".repeat(40)), "poor");
+  assert.equal(assessPages([clean, clean, clean]), "good");
+  assert.equal(assessPages([clean, "", "", clean]), "poor");
+});
+
+test("Clause library covers every deed type in both languages", () => {
+  for (const type of deedTypeOrder) {
+    const clauses = clauseLibrary(type);
+    assert.ok(clauses.length > 0, type);
+    assert.equal(new Set(clauses.map((clause) => clause.id)).size, clauses.length, type + " unique ids");
+    for (const clause of clauses) assert.ok(clause.hindi.startsWith("यह कि") && clause.english.startsWith("That"), clause.id);
+  }
 });
 
 console.log("\n" + passed + " checks passed.");

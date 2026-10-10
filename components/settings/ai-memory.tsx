@@ -61,7 +61,7 @@ export function AiMemoryManager({ available, aiEnabled, notes: initialNotes, ref
       {!available ? (
         <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <p>AI memory needs one database update. Run <span className="font-mono">supabase/migrations/202610100004_ai_memory.sql</span> in the Supabase SQL editor, then reload this page. Until then the AI uses the built-in reference deeds only.</p>
+          <p>AI memory needs one database update. Run <span className="font-mono">supabase/migrations/202610100005_ai_memory.sql</span> in the Supabase SQL editor, then reload this page. Until then the AI uses the built-in reference deeds only.</p>
         </div>
       ) : null}
       {!aiEnabled ? <p className="rounded-xl border border-border bg-secondary/40 p-4 text-sm text-muted-foreground">AI is not set up, so uploads cannot be read yet. Add the AWS settings to .env.local.</p> : null}

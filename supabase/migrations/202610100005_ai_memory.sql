@@ -1,4 +1,4 @@
--- AI drafting memory: firm drafting instructions and accepted reference drafts
+-- 0005: AI drafting memory: firm drafting instructions and accepted reference drafts
 -- that the AI follows when drafting, reviewing and answering questions.
 -- Safe to run more than once.
 

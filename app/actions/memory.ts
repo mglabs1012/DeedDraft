@@ -13,7 +13,7 @@ import type { AiMemory } from "@/types/database";
 
 type Result<T = object> = { error: string } | ({ error?: undefined } & T);
 
-const MIGRATION_HINT = "AI memory needs the database update in supabase/migrations/202610100004_ai_memory.sql. Run it in the Supabase SQL editor.";
+const MIGRATION_HINT = "AI memory needs the database update in supabase/migrations/202610100005_ai_memory.sql. Run it in the Supabase SQL editor.";
 const deedType = z.enum(deedTypeIds);
 const ACCEPTED = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/jpeg", "image/png"];
 

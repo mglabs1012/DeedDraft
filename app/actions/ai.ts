@@ -2,13 +2,15 @@
 
 import { z } from "zod";
 
-import { AI_NOT_CONFIGURED, AiError, MAX_DOCUMENTS_PER_REQUEST, aiModel, fileBlocks, generateJson, isAiConfigured, usageDetails, type AiUsage, type ContentPart } from "@/lib/ai/claude";
+import { AI_NOT_CONFIGURED, AiError, MAX_DOCUMENTS_PER_REQUEST, aiModel, fileBlocks, generate, generateJson, isAiConfigured, usageDetails, type AiUsage, type ContentPart } from "@/lib/ai/claude";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { identityWarnings, normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, type Extraction, type ReviewIssue } from "@/lib/ai/parse";
-import { clausePrompt, extractionPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "@/lib/ai/prompts";
+import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "@/lib/ai/prompts";
 import { relevantFacts } from "@/lib/ai/facts";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
 import { getReadiness } from "@/lib/drafting";
+import { draftForAi, editableDraftSchema, validOperations, type EditOperation } from "@/lib/drafting/editable";
+import { readDocument, type ReadResult } from "@/lib/ocr/read";
 import { parseDeedData, type DeedData, type Party, type Property } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
@@ -83,36 +85,73 @@ function redact(data: DeedData, type: DeedType) {
 
 /* ------------------------------------------------------------ Extraction */
 
-const extractSchema = z.object({ deedId: z.string().uuid(), documentId: z.string().uuid() });
+const MAX_TEXT_FOR_EXTRACTION = 60_000;
 
-export async function extractFromDocument(input: unknown): Promise<Result<{ extraction: Extraction }>> {
-  const parsed = extractSchema.safeParse(input);
+type Workspace = Awaited<ReturnType<typeof requireWorkspace>>;
+type DocumentText = { text: string; source: string; quality: string; pages: number | null; cached: boolean };
+
+/** Chat history for audit (table from migration 202609290004). Best-effort: a missing table never breaks the chat. */
+async function remember(workspace: Workspace, deedId: string, role: "user" | "assistant", content: string, meta: Record<string, Json> = {}) {
+  await workspace.supabase.from("deed_ai_messages").insert({ deed_id: deedId, firm_id: workspace.firm.id, user_id: workspace.user.id, role, content: content.slice(0, 20_000), meta });
+}
+
+/**
+ * A document's text, read once and cached on the document row: PDF text layer
+ * (with Kruti Dev conversion) or Word text for free, AI OCR on Bedrock only for
+ * scans and garbled pages.
+ */
+async function documentText(workspace: Workspace, deedId: string, documentId: string, force: boolean): Promise<DocumentText> {
+  const { data: document } = await workspace.supabase.from("deed_documents").select("*").eq("id", documentId).eq("deed_id", deedId).eq("firm_id", workspace.firm.id).maybeSingle();
+  if (!document) throw new AiError("Document not found.");
+  if (!force && document.extracted_text && document.text_source) {
+    return { text: document.extracted_text, source: document.text_source, quality: document.text_quality ?? "good", pages: document.page_count ?? null, cached: true };
+  }
+  if (document.size_bytes > MAX_FILE_BYTES) throw new AiError("Files over 20 MB cannot be read. Upload a smaller scan (300 dpi, greyscale).");
+
+  const { data: blob, error } = await workspace.supabase.storage.from("deed-documents").download(document.storage_path);
+  if (error || !blob) throw new AiError("Could not read the document from storage.");
+
+  const result: ReadResult = await readDocument({ bytes: new Uint8Array(await blob.arrayBuffer()), mime: document.mime_type, fileName: document.file_name, allowAi: isAiConfigured() });
+  if (result.usage) await logUsage(workspace, deedId, "ai_read_document", result.usage, { file_name: document.file_name, pages: result.pages ?? null });
+
+  // Cache the text (ignored if migration 202609290004 has not been applied yet).
+  await workspace.supabase
+    .from("deed_documents")
+    .update({ extracted_text: result.text, text_source: result.source, text_quality: result.quality, page_count: result.pages, processed_at: new Date().toISOString() })
+    .eq("id", document.id);
+
+  return { text: result.text, source: result.source, quality: result.quality, pages: result.pages, cached: false };
+}
+
+const readSchema = z.object({ deedId: z.string().uuid(), documentId: z.string().uuid(), force: z.boolean().optional() });
+
+export async function readDocumentText(input: unknown): Promise<Result<DocumentText>> {
+  const parsed = readSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid request." };
+  const { workspace, deed } = await loadDeed(parsed.data.deedId);
+  if (!deed) return { error: "Deed not found." };
+  try {
+    return await documentText(workspace, deed.id, parsed.data.documentId, parsed.data.force ?? false);
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function extractFromDocument(input: unknown): Promise<Result<{ extraction: Extraction; source: string }>> {
+  const parsed = readSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid request." };
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
-
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
 
-  const { data: document } = await workspace.supabase
-    .from("deed_documents")
-    .select("*")
-    .eq("id", parsed.data.documentId)
-    .eq("deed_id", deed.id)
-    .eq("firm_id", workspace.firm.id)
-    .maybeSingle();
-  if (!document) return { error: "Document not found." };
-  if (document.size_bytes > MAX_FILE_BYTES) return { error: "AI extraction supports files up to 20 MB. Upload a smaller scan." };
-
-  const { data: blob, error: downloadError } = await workspace.supabase.storage.from("deed-documents").download(document.storage_path);
-  if (downloadError || !blob) return { error: "Could not read the document from storage." };
-
   try {
-    const blocks = await fileBlocks(document.mime_type, new Uint8Array(await blob.arrayBuffer()), document.file_name);
-    if (documentCount(blocks) > MAX_DOCUMENTS_PER_REQUEST) return { error: TOO_MANY_PAGES };
+    const read = await documentText(workspace, deed.id, parsed.data.documentId, parsed.data.force ?? false);
+    if (read.text.replace(/\s+/g, "").length < 40) return { error: "No readable text was found in this document. Re-scan it at 300 dpi or upload a clearer photo." };
+    const { data: document } = await workspace.supabase.from("deed_documents").select("category, file_name").eq("id", parsed.data.documentId).maybeSingle();
     const { data: raw, usage } = await generateJson({
       model: aiModel("extraction"),
-      system: extractionPrompt(deed.deed_type, document.category),
-      content: [...blocks, { text: "Extract the particulars from this document: " + document.file_name }],
+      system: extractionFromTextPrompt(deed.deed_type, document?.category ?? "other"),
+      content: "Document: " + (document?.file_name ?? "") + "\n\n" + read.text.slice(0, MAX_TEXT_FOR_EXTRACTION),
       schema: extractionSchema,
       name: "save_extraction",
       description: "Save the particulars read from the document",
@@ -121,8 +160,9 @@ export async function extractFromDocument(input: unknown): Promise<Result<{ extr
       timeoutMs: 200_000,
     });
     const extraction = normaliseExtraction(raw);
-    await logUsage(workspace, deed.id, "ai_extracted_document", usage, { file_name: document.file_name });
-    return { extraction };
+    if (read.quality === "poor") extraction.warnings.unshift("The document text was hard to read; double-check every value.");
+    await logUsage(workspace, deed.id, "ai_extracted_document", usage, { file_name: document?.file_name ?? "", text_source: read.source });
+    return { extraction, source: read.source };
   } catch (error) {
     return failure(error);
   }
@@ -293,4 +333,110 @@ export async function autofillFromDocuments(input: unknown): Promise<Result<{ re
   } catch (error) {
     return failure(error);
   }
+}
+
+/* ------------------------------------------------ Draft studio: chat and review */
+
+const chatSchema = z.object({
+  deedId: z.string().uuid(),
+  draft: editableDraftSchema,
+  message: z.string().trim().min(2, "Type an instruction.").max(4000),
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+});
+
+const chatReplySchema = {
+  type: "object",
+  properties: { reply: { type: "string" }, operations: { type: "array", items: { type: "object" }, description: "Proposed edits to the draft blocks" } },
+  required: ["reply", "operations"],
+};
+
+export async function chatEditDraft(input: unknown): Promise<Result<{ reply: string; operations: EditOperation[] }>> {
+  const parsed = chatSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid request." };
+  if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
+  const { workspace, deed } = await loadDeed(parsed.data.deedId);
+  if (!deed) return { error: "Deed not found." };
+  const { draft, message, history } = parsed.data;
+
+  try {
+    const memory = await draftingContext(workspace, deed.deed_type, draft.language, { references: false });
+    const turns = [...history, { role: "user" as const, content: message }];
+    while (turns.length && turns[0].role !== "user") turns.shift();
+    const { data: raw, usage } = await generateJson<{ reply?: unknown; operations?: unknown }>({
+      system: draftChatPrompt(deed.deed_type, draft.language),
+      cachedContext: [memory.text, "MATTER DATA (identity numbers removed):\n" + JSON.stringify(redact(parseDeedData(deed.data), deed.deed_type)), "CLIENT REMARKS:\n" + (deed.remarks ?? ""), "CURRENT DRAFT:\n" + draftForAi(draft)].filter(Boolean).join("\n\n"),
+      content: turns.map((turn) => ({ role: turn.role, content: [{ text: turn.content }] })),
+      schema: chatReplySchema,
+      name: "propose_changes",
+      description: "Reply and propose edits to the draft",
+      maxTokens: 8000,
+      temperature: 0.2,
+    });
+    const operations = validOperations(draft, Array.isArray(raw.operations) ? raw.operations : []);
+    const reply = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 4000) : operations.length ? "Proposed " + operations.length + " change(s)." : "No changes proposed.";
+    await remember(workspace, deed.id, "user", message, { language: draft.language });
+    await remember(workspace, deed.id, "assistant", reply, { operations: operations.length });
+    await logUsage(workspace, deed.id, "ai_chat_draft", usage, { operations: operations.length });
+    return { reply, operations };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+export async function reviewDraftText(input: unknown): Promise<Result<{ issues: ReviewIssue[] }>> {
+  const parsed = z.object({ deedId: z.string().uuid(), draft: editableDraftSchema }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid request." };
+  if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
+  const { workspace, deed } = await loadDeed(parsed.data.deedId);
+  if (!deed) return { error: "Deed not found." };
+  try {
+    const memory = await draftingContext(workspace, deed.deed_type, parsed.data.draft.language, { references: false });
+    const { data: raw, usage } = await generateJson({
+      system: draftReviewPrompt(deed.deed_type),
+      cachedContext: memory.text || undefined,
+      content: "MATTER DATA:\n" + JSON.stringify(redact(parseDeedData(deed.data), deed.deed_type)) + "\n\nDRAFT:\n" + draftForAi(parsed.data.draft),
+      schema: reviewSchema,
+      name: "save_review",
+      description: "Save the review findings",
+      maxTokens: 6000,
+      temperature: 0,
+    });
+    const issues = normaliseReview(raw);
+    await remember(workspace, deed.id, "assistant", "Reviewed the draft: " + issues.length + " issue(s).", { review: true });
+    await logUsage(workspace, deed.id, "ai_reviewed_draft", usage, { issues: issues.length });
+    return { issues };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/* ----------------------------------------------------------- Diagnostics */
+
+export type AiDiagnostics = {
+  configured: boolean;
+  region: string;
+  model: string;
+  extractionModel: string;
+  fastModel: string;
+  ping?: { ok: boolean; latencyMs?: number; servedBy?: string; error?: string };
+  fastPing?: { ok: boolean; latencyMs?: number; error?: string };
+};
+
+/** Settings → AI connection: shows the Bedrock setup and sends two tiny test requests. */
+export async function testAiConnection(): Promise<AiDiagnostics> {
+  await requireWorkspace();
+  const result: AiDiagnostics = { configured: isAiConfigured(), region: process.env.AWS_REGION ?? "", model: aiModel(), extractionModel: aiModel("extraction"), fastModel: aiModel("fast") };
+  if (!result.configured) return result;
+  const ping = async (model: string) => {
+    const started = Date.now();
+    try {
+      const { usage } = await generate({ system: "Reply with the single word OK.", content: "OK?", model, maxTokens: 5, temperature: 0, timeoutMs: 30_000 });
+      return { ok: true, latencyMs: Date.now() - started, servedBy: usage.model };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "Request failed." };
+    }
+  };
+  result.ping = await ping(result.model);
+  result.fastPing = result.fastModel === result.model ? result.ping : await ping(result.fastModel);
+  return result;
 }

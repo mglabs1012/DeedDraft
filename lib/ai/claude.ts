@@ -302,10 +302,10 @@ export async function fileBlocks(mimeType: string, data: Uint8Array, fileName: s
     }
     return blocks;
   }
-  if (mimeType === "image/jpeg" || mimeType === "image/png") {
+  if (mimeType === "image/jpeg" || mimeType === "image/png" || mimeType === "image/webp") {
     return [{ image: { format: "jpeg" as ImageFormat, source: { bytes: await prepareImage(data) } } }];
   }
-  throw new AiError("Only PDF, JPG and PNG files can be read by AI.");
+  throw new AiError("Only PDF, JPG, PNG and WebP files can be read by AI.");
 }
 
 /** Log line for usage tracking (tokens, cache hits, latency). */

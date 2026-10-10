@@ -72,7 +72,8 @@ export function NewDeedForm({ initialType, initialTemplate, library, aiEnabled }
         if (result.error) return toast.error(result.error);
         if (result.id) {
           toast.success("Document created.");
-          router.push("/app/deeds/" + result.id);
+          // Property deeds start with their papers (Documents tab); template documents start with their form.
+          router.push("/app/deeds/" + result.id + (template ? "" : "?tab=documents"));
           router.refresh();
         }
       });

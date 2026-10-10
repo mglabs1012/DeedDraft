@@ -3,6 +3,7 @@ import type { DeedData } from "@/lib/schemas/deed-data";
 
 import { renderDraftHtml, type Block, type DraftDocument } from "./blocks";
 import { createContext, paymentsTotal, type Ctx, type DraftInput } from "./common";
+import { fromEditable, toEditable, type EditableDraft } from "./editable";
 import { convertText, localizeData } from "./localize";
 import { agreementToSell } from "./templates/agreement";
 import { genericDeed, partitionDeed, releaseDeed, willDeed } from "./templates/family";
@@ -14,6 +15,7 @@ export { paymentsTotal } from "./common";
 export { rentSchedule } from "./templates/tenancy";
 export type { DraftInput } from "./common";
 export type { Block, DraftDocument } from "./blocks";
+export type { EditableBlock, EditableDraft } from "./editable";
 
 const templates: Record<DeedType, (ctx: Ctx) => Block[]> = {
   sale: saleDeed,
@@ -42,17 +44,25 @@ export function defaultDraftChoice(type: DeedType, language: "english" | "hindi"
   return choices[0];
 }
 
-export function buildDraftDocuments(input: DraftInput, choice: DraftChoice): DraftDocument[] {
+export function buildDraftDocuments(input: DraftInput, choice: DraftChoice, overrides: Partial<Record<DraftLanguage, EditableDraft>> = {}): DraftDocument[] {
   const languages: DraftLanguage[] = choice === "both" ? getDeedType(input.type).languages : [choice];
   return languages.map((language) => {
+    // A saved, edited version (draft studio) wins over the generated draft.
+    const edited = overrides[language];
+    if (edited) return fromEditable(edited);
     // Names, addresses and other typed text in the script of this language (see localize.ts).
     const localized: DraftInput = { ...input, data: localizeData(input.data, language), firmCity: convertText(input.firmCity, language, input.data.localized?.[language] ?? {}) ?? input.firmCity };
     return { language, blocks: templates[input.type](createContext(localized, language)) };
   });
 }
 
-export function buildDraft(input: DraftInput, choice: DraftChoice) {
-  const documents = buildDraftDocuments(input, choice);
+/** Freshly generated, editable version of the draft for one language (with converted names). */
+export function generateEditable(input: DraftInput, language: DraftLanguage): EditableDraft {
+  return toEditable(buildDraftDocuments(input, language)[0]);
+}
+
+export function buildDraft(input: DraftInput, choice: DraftChoice, overrides: Partial<Record<DraftLanguage, EditableDraft>> = {}) {
+  const documents = buildDraftDocuments(input, choice, overrides);
   return {
     documents,
     html: renderDraftHtml({

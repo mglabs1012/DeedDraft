@@ -55,7 +55,7 @@ export type Block =
 
 export type DraftDocument = { language: "hindi" | "english"; blocks: Block[] };
 
-function renderBlock(block: Block): string {
+export function renderBlock(block: Block): string {
   switch (block.t) {
     case "invocation":
       return `<p class="invocation">${esc(block.text)}</p>`;

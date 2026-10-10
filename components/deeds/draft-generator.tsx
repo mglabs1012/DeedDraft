@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Braces, BookmarkPlus, CheckCircle2, Circle, FileDown, Languages, LoaderCircle, Printer, RotateCcw, Sparkles, Stamp, Wand2 } from "lucide-react";
+import { Braces, BookmarkPlus, CheckCircle2, Circle, Eye, FileDown, Languages, LoaderCircle, PenLine, Printer, RotateCcw, Sparkles, Stamp, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
+import type { SavedDraft } from "@/app/actions/drafts";
 import { convertForDraft, saveConversions } from "@/app/actions/language";
 import { saveDraftAsReference } from "@/app/actions/memory";
 import { discardRefinement, refineDraft } from "@/app/actions/refine";
 import { DeedReview } from "@/components/deeds/ai/deed-review";
+import { DraftStudio } from "@/components/deeds/draft-studio";
 import { Button } from "@/components/ui/button";
-import type { DeedType, DraftLanguage, SectionId } from "@/lib/deed-types";
+import { getDeedType, type DeedType, type DraftLanguage, type SectionId } from "@/lib/deed-types";
 import type { DeedLanguage, DeedStatus } from "@/lib/deeds";
 import { buildDraftDocuments, defaultDraftChoice, draftChoices, type DraftChoice, type DraftDocument, type ReadinessItem } from "@/lib/drafting";
 import { renderDraftHtml } from "@/lib/drafting/blocks";
+import { editableDraftSchema, fromEditable, toEditable, type EditableDraft } from "@/lib/drafting/editable";
 import { pendingConversions, usedConversions } from "@/lib/drafting/localize";
 import { applyEdits, blockSegments, hashSegments } from "@/lib/drafting/segments";
 import type { AiDraftVersion, DeedData, Localized } from "@/lib/schemas/deed-data";
@@ -35,6 +38,8 @@ type Props = {
   onLocalized?: (localized: Localized) => void;
   onAiDraft?: (aiDraft: DeedData["aiDraft"]) => void;
   pending: boolean;
+  savedDrafts?: SavedDraft[];
+  onDraftSaved?: (draft: SavedDraft) => void;
 };
 
 const choiceLabels: Record<DraftChoice, string> = { hindi: "हिंदी", english: "English", both: "Both" };
@@ -58,10 +63,12 @@ function refinedFor(doc: DraftDocument, version: AiDraftVersion | undefined) {
   return fresh ? { state: "fresh" as const, doc: { ...doc, blocks: applyEdits(doc.blocks, version.edits) } } : { state: "stale" as const };
 }
 
-export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, language, data, firmName, city, readiness, status, onMarkGenerated, onJump, onLocalized, onAiDraft, pending }: Props) {
+export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, language, data, firmName, city, readiness, status, onMarkGenerated, onJump, onLocalized, onAiDraft, pending, savedDrafts = [], onDraftSaved }: Props) {
   const choices = useMemo(() => draftChoices(type), [type]);
   const [choice, setChoice] = useState<DraftChoice>(() => defaultDraftChoice(type, language));
   const [view, setView] = useState<"ai" | "standard">("ai");
+  const [mode, setMode] = useState<"preview" | "edit">("preview");
+  const [useEdited, setUseEdited] = useState(true);
   const [converting, setConverting] = useState<DraftLanguage | null>(null);
   const [refining, setRefining] = useState<DraftLanguage | null>(null);
   const [busy, startTransition] = useTransition();
@@ -72,7 +79,33 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
   const standard = useMemo(() => buildDraftDocuments({ type, title, referenceNo, data, firmName, firmCity: city }, choice), [type, title, referenceNo, data, firmName, city, choice]);
   const refined = useMemo(() => standard.map((doc) => ({ language: doc.language, ...refinedFor(doc, data.aiDraft[doc.language]) })), [standard, data.aiDraft]);
   const anyFresh = refined.some((item) => item.state === "fresh");
-  const shown = useMemo(() => standard.map((doc, index) => (view === "ai" && refined[index].state === "fresh" ? refined[index].doc! : doc)), [standard, refined, view]);
+  const latest = useMemo(() => {
+    const result: Partial<Record<DraftLanguage, { draft: EditableDraft; version: number }>> = {};
+    for (const saved of [...savedDrafts].sort((a, b) => b.version - a.version)) {
+      if (result[saved.language]) continue;
+      const parsed = editableDraftSchema.safeParse(saved.content);
+      if (parsed.success) result[saved.language] = { draft: parsed.data as EditableDraft, version: saved.version };
+    }
+    return result;
+  }, [savedDrafts]);
+  const editedNote = Object.entries(latest).map(([key, value]) => (key === "hindi" ? "हिंदी" : "English") + " v" + value!.version).join(", ");
+  const generated = useMemo(() => standard.map((doc, index) => (view === "ai" && refined[index].state === "fresh" ? refined[index].doc! : doc)), [standard, refined, view]);
+  const shown = useMemo(() => generated.map((doc) => (useEdited && latest[doc.language] ? fromEditable(latest[doc.language]!.draft) : doc)), [generated, latest, useEdited]);
+  // The studio starts from what is being previewed (AI refined when fresh, otherwise standard).
+  const generators = useMemo(
+    () =>
+      Object.fromEntries(
+        getDeedType(type).languages.map((lang) => [
+          lang,
+          () => {
+            const [doc] = buildDraftDocuments({ type, title, referenceNo, data, firmName, firmCity: city }, lang);
+            const fresh = refinedFor(doc, data.aiDraft[lang]);
+            return toEditable(fresh.state === "fresh" ? fresh.doc : doc);
+          },
+        ]),
+      ) as Record<DraftLanguage, () => EditableDraft>,
+    [type, title, referenceNo, data, firmName, city],
+  );
   const html = useMemo(() => renderDraftHtml({ title: referenceNo + " · " + title, documents: shown, footer: "Ref. " + referenceNo + " · Drafted by " + firmName + ", " + city }), [shown, referenceNo, title, firmName, city]);
 
   // Automatic Hindi ⇄ English conversion of typed names and addresses for the chosen draft language.
@@ -145,7 +178,33 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
 
   const downloadJson = () => download([JSON.stringify({ referenceNo, type, title, language, data }, null, 2)], "application/json", referenceNo + ".json");
 
+  const toggle = (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="inline-flex rounded-lg border border-border bg-card p-1 text-sm font-semibold shadow-sm" role="tablist">
+        <button aria-selected={mode === "preview"} className={cn("inline-flex items-center gap-1.5 rounded-md px-3 py-1.5", mode === "preview" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-primary")} onClick={() => setMode("preview")} role="tab" type="button"><Eye className="size-4" /> Preview & export</button>
+        <button aria-selected={mode === "edit"} className={cn("inline-flex items-center gap-1.5 rounded-md px-3 py-1.5", mode === "edit" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-primary")} onClick={() => setMode("edit")} role="tab" type="button"><PenLine className="size-4" /> Edit{aiEnabled ? " & chat with AI" : " draft"}</button>
+      </div>
+      {editedNote ? (
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <input checked={useEdited} className="size-4 accent-[var(--primary)]" onChange={(event) => setUseEdited(event.target.checked)} type="checkbox" />
+          Use edited version ({editedNote})
+        </label>
+      ) : null}
+    </div>
+  );
+
+  if (mode === "edit" && deedId) {
+    return (
+      <div className="space-y-4">
+        {toggle}
+        <DraftStudio aiEnabled={Boolean(aiEnabled)} deedId={deedId} generated={generators} languages={getDeedType(type).languages} onSaved={(draft) => onDraftSaved?.(draft)} saved={savedDrafts} />
+      </div>
+    );
+  }
+
   return (
+    <div className="space-y-4">
+    {deedId ? toggle : null}
     <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
       <aside className="space-y-6">
         <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
@@ -233,6 +292,7 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
           <p className="text-sm font-semibold text-primary">Preview</p>
           <div className="flex items-center gap-2">
             {converting ? <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-foreground"><LoaderCircle className="size-3.5 animate-spin" /> Converting names to {langName[converting]}…</span> : null}
+            {useEdited && languages.some((lang) => latest[lang]) ? <span className="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-800">Edited version</span> : null}
             {anyFresh ? (
               <div className="grid grid-flow-col gap-1 rounded-lg bg-secondary p-1 text-xs font-semibold" role="tablist">
                 {(["ai", "standard"] as const).map((item) => (
@@ -248,6 +308,7 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
         </div>
         <iframe className="h-[70vh] min-h-[480px] w-full bg-white sm:h-[80vh]" sandbox="allow-same-origin" srcDoc={html} title="Draft preview" />
       </section>
+    </div>
     </div>
   );
 }

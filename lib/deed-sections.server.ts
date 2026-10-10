@@ -8,7 +8,7 @@ type Workspace = Awaited<ReturnType<typeof requireWorkspace>>;
 
 /**
  * Saves one key of deeds.data atomically through update_deed_section
- * (migration 0004 allows the AI sections). On databases where that migration
+ * (migration 202610100005 allows the AI sections). On databases where that migration
  * has not run yet, falls back to read-modify-write of the whole data object.
  */
 export async function saveDeedSection(workspace: Workspace, deedId: string, section: "custom" | "localized" | "aiDraft" | "chat", value: unknown): Promise<string | null> {

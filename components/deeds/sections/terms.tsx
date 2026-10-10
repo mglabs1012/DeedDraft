@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
-import { LoaderCircle, Save } from "lucide-react";
+import { BookOpen, Check, LoaderCircle, Plus, Save } from "lucide-react";
 
 import { ClauseAssistant } from "@/components/deeds/ai/clause-assistant";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Field, inputClass, textareaClass } from "@/components/ui/field";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
 import { formatINR, type DeedLanguage } from "@/lib/deeds";
 import { rentSchedule } from "@/lib/drafting";
+import { clauseLibrary } from "@/lib/drafting/clause-library";
 import { englishLongDate, shortDate, termEndDate } from "@/lib/drafting/hindi";
 import { executionSchema, termsSchema, type Execution, type Terms } from "@/lib/schemas/deed-data";
 
@@ -189,6 +190,15 @@ function TermsCard({ deedType, terms, save, aiEnabled, deedId, deedLanguage = "h
       <Field hint="one clause per line; added before the schedule" label="Additional clauses">
         <textarea className={textareaClass + " min-h-28"} placeholder="यह कि ..." {...form.register("additionalClauses")} />
       </Field>
+      <ClauseLibrary
+        current={String(watched.additionalClauses ?? "")}
+        deedLanguage={deedLanguage}
+        deedType={deedType}
+        onAdd={(clause) => {
+          const current = String(form.getValues("additionalClauses") ?? "").trim();
+          form.setValue("additionalClauses", [current, clause].filter(Boolean).join("\n"), { shouldDirty: true });
+        }}
+      />
       {aiEnabled && deedId ? (
         <ClauseAssistant
           deedId={deedId}
@@ -201,6 +211,39 @@ function TermsCard({ deedType, terms, save, aiEnabled, deedId, deedLanguage = "h
       ) : null}
       <SaveButton dirty={form.formState.isDirty} label="Save terms" pending={pending} />
     </form>
+  );
+}
+
+/** Ready-made optional clauses for the deed type, drawn from registered precedents. */
+function ClauseLibrary({ deedType, deedLanguage, current, onAdd }: { deedType: DeedType; deedLanguage: DeedLanguage; current: string; onAdd: (clause: string) => void }) {
+  const clauses = clauseLibrary(deedType);
+  const languages: ("hindi" | "english")[] = deedLanguage === "bilingual" ? ["hindi", "english"] : [deedLanguage];
+  if (!clauses.length) return null;
+  return (
+    <details className="group rounded-lg border border-border bg-muted/30">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-semibold text-primary">
+        <BookOpen className="size-4" /> Clause library <span className="font-normal text-muted-foreground">· {clauses.length} standard clauses</span>
+      </summary>
+      <ul className="divide-y divide-border border-t border-border">
+        {clauses.map((clause) => (
+          <li className="space-y-2 px-3 py-3" key={clause.id}>
+            <p className="text-sm font-semibold text-primary">{clause.title}</p>
+            {languages.map((language) => {
+              const text = clause[language];
+              const added = current.includes(text);
+              return (
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between" key={language}>
+                  <p className="text-sm text-muted-foreground" lang={language === "hindi" ? "hi" : "en"}>{text}</p>
+                  <Button className="shrink-0" disabled={added} onClick={() => onAdd(text)} size="sm" type="button" variant="outline">
+                    {added ? <Check /> : <Plus />} {added ? "Added" : languages.length > 1 ? (language === "hindi" ? "Add हिंदी" : "Add English") : "Add"}
+                  </Button>
+                </div>
+              );
+            })}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
