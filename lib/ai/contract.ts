@@ -1,7 +1,7 @@
 /**
  * Shared AI contract: the context shape for model calls and the
  * non-destructive merge used when applying AI extraction results.
- * Model calls live in lib/ai/openrouter.ts and app/actions/ai.ts.
+ * Model calls live in lib/ai/claude.ts and app/actions/ai.ts.
  */
 
 import { getDeedType, type DeedType } from "@/lib/deed-types";

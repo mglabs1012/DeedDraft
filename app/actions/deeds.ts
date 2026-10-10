@@ -10,7 +10,8 @@ import {
   updateDeedTitleSchema,
   updateRemarksSchema,
 } from "@/lib/schemas/deeds";
-import { parseDeedData, updateDeedSectionSchema } from "@/lib/schemas/deed-data";
+import { emptyDeedData, parseDeedData, updateDeedSectionSchema } from "@/lib/schemas/deed-data";
+import { getLibraryEntry } from "@/lib/templates/library.server";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
 
@@ -33,16 +34,20 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
   const parsed = createDeedSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
 
+  const template = parsed.data.templateId ? getLibraryEntry(parsed.data.templateId) : null;
+  if (parsed.data.templateId && !template) return { error: "That template is no longer available." };
+
   const workspace = await requireWorkspace();
   const { data, error } = await workspace.supabase
     .from("deeds")
     .insert({
       firm_id: workspace.firm.id,
-      deed_type: parsed.data.deedType,
+      deed_type: template ? "other" : parsed.data.deedType,
       title: parsed.data.title,
       language: parsed.data.language,
       remarks: parsed.data.remarks || null,
       created_by: workspace.user.id,
+      ...(template ? { data: { ...emptyDeedData(), custom: { templateId: template.id, title: template.title, answers: {}, drafts: {} } } as unknown as Json } : {}),
     })
     .select("id, reference_no")
     .single();
@@ -54,7 +59,7 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
     deed_id: data.id,
     user_id: workspace.user.id,
     action: "created_deed",
-    details: { reference_no: data.reference_no, deed_type: parsed.data.deedType },
+    details: { reference_no: data.reference_no, deed_type: template ? "other" : parsed.data.deedType, ...(template ? { template: template.title } : {}) },
   });
 
   revalidatePath("/app/dashboard");

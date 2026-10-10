@@ -25,7 +25,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
         </div>
         <p className="text-sm text-primary-foreground/60">Designed for Indian legal practice.</p>
       </section>
-      <section className="flex items-center justify-center px-6 py-12 sm:px-10">
+      <section className="flex items-center justify-center px-4 py-10 sm:px-10 sm:py-12">
         <div className="w-full max-w-md">
           <Link className="mb-8 flex items-center gap-2.5 font-semibold text-primary lg:hidden" href="/">
             <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">

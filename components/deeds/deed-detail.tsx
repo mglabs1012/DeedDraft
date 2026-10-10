@@ -33,7 +33,9 @@ import {
   recategorizeDocument,
 } from "@/app/actions/documents";
 import { extractFromDocument } from "@/app/actions/ai";
+import { AssistantDrawer } from "@/components/deeds/ai/assistant-drawer";
 import { ExtractionReview } from "@/components/deeds/ai/extraction-review";
+import { CustomDetailsForm, CustomDraftPanel } from "@/components/deeds/custom/custom-document";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
 import { DraftGenerator } from "@/components/deeds/draft-generator";
 import { PartiesSection } from "@/components/deeds/sections/parties";
@@ -57,13 +59,14 @@ import {
 import { getReadiness, paymentsTotal } from "@/lib/drafting";
 import { displayName } from "@/lib/drafting/format";
 import type { Extraction } from "@/lib/ai/parse";
-import type { DeedData } from "@/lib/schemas/deed-data";
+import type { DeedData, Localized } from "@/lib/schemas/deed-data";
+import type { LibraryEntry } from "@/lib/templates/catalog";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, Deed } from "@/types/database";
 
 type Document = Database["public"]["Tables"]["deed_documents"]["Row"];
 type Activity = Database["public"]["Tables"]["activity_log"]["Row"];
-type Tab = "overview" | SectionId | "remarks" | "generate";
+type Tab = "overview" | SectionId | "remarks" | "generate" | "details" | "draft";
 type UploadItem = { id: string; file: File; category: DocumentCategory; status: "ready" | "uploading" | "complete" | "error" };
 
 const inputClass = "h-10 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15";
@@ -96,7 +99,10 @@ export function DeedDetail({
   firmCity,
   initialData,
   aiEnabled = false,
+  template = null,
 }: {
+  /** Set when the deed was started from the template library. */
+  template?: { entry: LibraryEntry; text: string } | null;
   aiEnabled?: boolean;
   deed: Deed;
   documents: Document[];
@@ -107,7 +113,8 @@ export function DeedDetail({
   initialData: DeedData;
 }) {
   const config = getDeedType(deed.deed_type);
-  const [tab, setTab] = useState<Tab>("overview");
+  const custom = template && initialData.custom ? template : null;
+  const [tab, setTab] = useState<Tab>(custom ? (initialData.custom?.drafts.english || initialData.custom?.drafts.hindi ? "draft" : "details") : "overview");
   const [title, setTitle] = useState(deed.title);
   const [editingTitle, setEditingTitle] = useState(false);
   const [status, setStatus] = useState(deed.status);
@@ -141,7 +148,12 @@ export function DeedDetail({
     documents: documents.length,
   };
 
-  const tabs: Array<{ id: Tab; label: string; count?: number }> = [
+  const tabs: Array<{ id: Tab; label: string; count?: number }> = custom ? [
+    { id: "details", label: "1. Details" },
+    { id: "draft", label: "2. Draft" },
+    { id: "documents", label: "Documents", count: documents.length },
+    { id: "remarks", label: "Notes" },
+  ] : [
     { id: "overview", label: "Overview" },
     ...sectionsFor(deed.deed_type).map((section) => ({ id: section as Tab, label: sectionLabels[section], count: counts[section] })),
     { id: "remarks", label: "Remarks" },
@@ -179,6 +191,13 @@ export function DeedDetail({
     },
     [deed.id],
   );
+
+  const onLocalized = useCallback((localized: Localized) => setData((current) => ({ ...current, localized })), []);
+  const onAiDraft = useCallback((aiDraft: DeedData["aiDraft"]) => setData((current) => ({ ...current, aiDraft })), []);
+  const addClauses = async (clauses: string[]) => {
+    const additionalClauses = [data.terms.additionalClauses, ...clauses].filter(Boolean).join(String.fromCharCode(10));
+    return saveSection("terms", { ...data.terms, additionalClauses });
+  };
 
   const saveTitle = () => {
     const nextTitle = title.trim();
@@ -290,14 +309,39 @@ export function DeedDetail({
           </div>
         </section>
       ) : null}
-      {tab === "parties" ? <PartiesSection deedType={deed.deed_type} parties={data.parties} save={saveSection} /> : null}
-      {tab === "properties" ? <PropertiesSection deedType={deed.deed_type} parties={data.parties} properties={data.properties} save={saveSection} /> : null}
+      {tab === "parties" ? <PartiesSection ai={aiEnabled ? { deedId: deed.id, firmId } : null} documentNames={Object.fromEntries(documents.map((document) => [document.id, document.file_name]))} deedType={deed.deed_type} parties={data.parties} save={saveSection} /> : null}
+      {tab === "properties" ? <PropertiesSection ai={aiEnabled ? { deedId: deed.id, firmId } : null} deedType={deed.deed_type} parties={data.parties} properties={data.properties} save={saveSection} /> : null}
       {tab === "title" ? <TitleChainSection entries={data.titleChain} save={saveSection} /> : null}
       {tab === "payments" ? <PaymentsSection consideration={data.consideration} deedType={deed.deed_type} payments={data.payments} save={saveSection} /> : null}
       {tab === "terms" ? <TermsSection aiEnabled={aiEnabled} deedId={deed.id} deedLanguage={deed.language} deedType={deed.deed_type} execution={data.execution} firmCity={firmCity} save={saveSection} terms={data.terms} /> : null}
+      {custom && data.custom && tab === "details" ? (
+        <CustomDetailsForm
+          custom={data.custom}
+          deedId={deed.id}
+          entry={custom.entry}
+          onNext={() => setTab("draft")}
+          onSaved={(answers) => setData((current) => (current.custom ? { ...current, custom: { ...current.custom, answers } } : current))}
+        />
+      ) : null}
+      {custom && data.custom && tab === "draft" ? (
+        <CustomDraftPanel
+          aiEnabled={aiEnabled}
+          custom={data.custom}
+          deedId={deed.id}
+          entry={custom.entry}
+          footer={"Ref. " + deed.reference_no + " · Prepared with " + firmName}
+          language={deed.language}
+          onDraft={(language, draft) => setData((current) => (current.custom ? { ...current, custom: { ...current.custom, drafts: { ...current.custom.drafts, [language]: draft } } } : current))}
+          onEditDetails={() => setTab("details")}
+          referenceNo={deed.reference_no}
+          templateText={custom.text}
+          title={title}
+        />
+      ) : null}
       {tab === "documents" ? <DocumentsTab aiEnabled={aiEnabled} deedId={deed.id} documents={documents} extractingId={extractingId} firmId={firmId} onExtract={extract} /> : null}
       {tab === "remarks" ? <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"><div className="flex items-start justify-between gap-4"><div><h2 className="font-semibold text-primary">Remarks & Instructions</h2><p className="mt-1 text-sm text-muted-foreground">Client instructions and drafting notes. These will also guide AI drafting later.</p></div><span className={"shrink-0 text-sm font-medium " + (savedState === "saved" ? "text-emerald-700" : savedState === "saving" ? "text-amber-700" : "text-destructive")}>{savedState === "saved" ? "Saved" : savedState === "saving" ? "Saving…" : "Not saved"}</span></div><textarea className="mt-5 min-h-72 w-full rounded-lg border border-border bg-background p-4 text-sm leading-6 outline-none focus:border-primary focus:ring-2 focus:ring-primary/15" onChange={(event) => setRemarks(event.target.value)} placeholder="Add matter-specific instructions, drafting notes, or follow-ups…" value={remarks} /></section> : null}
-      {tab === "generate" ? <DraftGenerator aiEnabled={aiEnabled} city={firmCity} deedId={deed.id} data={data} firmName={firmName} language={deed.language} onJump={setTab} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      {tab === "generate" ? <DraftGenerator aiEnabled={aiEnabled} city={firmCity} deedId={deed.id} data={data} firmName={firmName} language={deed.language} onAiDraft={onAiDraft} onJump={setTab} onLocalized={onLocalized} onMarkGenerated={() => changeStatus("generated")} pending={pending} readiness={readiness} referenceNo={deed.reference_no} status={status} title={title} type={deed.deed_type} /> : null}
+      {aiEnabled ? <AssistantDrawer deedId={deed.id} deedType={deed.deed_type} initial={initialData.chat} onAddClauses={custom ? undefined : addClauses} /> : null}
       {extraction ? <ExtractionReview data={data} deedType={deed.deed_type} extraction={extraction.result} fileName={extraction.fileName} onClose={() => setExtraction(null)} save={saveSection} /> : null}
     </div>
   );
@@ -378,7 +422,7 @@ function DocumentsTab({
 
   return (
     <section className="space-y-5">
-      {aiEnabled ? <div className="flex gap-3 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent-foreground"><Sparkles className="mt-0.5 size-4 shrink-0" /><p>Use <strong>Extract with AI</strong> on any paper (sale deed, patta, jamabandi, loan letter, Kruti Dev or scanned PDFs up to 10 MB) to pull parties, property, chain of title and payments into this matter for your review. The file is sent to the configured AI provider via OpenRouter.</p></div> : <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">AI extraction is available once an OpenRouter API key is configured. Files remain securely stored in this matter repository.</div>}
+      {aiEnabled ? <div className="flex gap-3 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm text-accent-foreground"><Sparkles className="mt-0.5 size-4 shrink-0" /><p>Use <strong>Extract with AI</strong> on any paper (sale deed, patta, jamabandi, loan letter, Kruti Dev or scanned PDFs up to 20 MB) to pull parties, property, chain of title and payments into this matter for your review. The file is sent to Claude on Amazon Bedrock.</p></div> : <div className="rounded-xl border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">AI extraction is available once Amazon Bedrock is configured. Files remain securely stored in this matter repository.</div>}
       <div className="rounded-xl border border-dashed border-primary/30 bg-card p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div><h2 className="font-semibold text-primary">Upload supporting documents</h2><p className="mt-1 text-sm text-muted-foreground">PDF, JPG, or PNG · maximum 20 MB each.</p></div>

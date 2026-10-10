@@ -1,4 +1,5 @@
-import { CircleUserRound, UserPlus } from "lucide-react";
+import Link from "next/link";
+import { Brain, ChevronRight, CircleUserRound, UserPlus } from "lucide-react";
 
 import { FirmSettingsForm } from "@/components/settings/firm-settings-form";
 import { ProfileForm } from "@/components/settings/profile-form";
@@ -23,6 +24,11 @@ export default async function SettingsPage() {
   return (
     <div className="max-w-4xl space-y-6 sm:space-y-7">
       <div><p className="text-sm font-semibold tracking-[0.16em] text-accent-foreground uppercase">Workspace</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-primary sm:text-3xl">Settings</h1><p className="mt-2 text-sm text-muted-foreground">Manage your profile and the details of your firm workspace.</p></div>
+      <Link className="flex items-center gap-4 rounded-xl border border-accent/40 bg-accent/5 p-4 shadow-sm transition hover:bg-accent/10 sm:p-6" href="/app/settings/ai">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><Brain className="size-5" /></span>
+        <span className="min-w-0 flex-1"><span className="block text-lg font-semibold text-primary">AI memory</span><span className="block text-sm text-muted-foreground">Drafting instructions and accepted drafts the AI follows for your firm.</span></span>
+        <ChevronRight className="size-5 shrink-0 text-muted-foreground" />
+      </Link>
       <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6"><h2 className="text-lg font-semibold text-primary">Your profile</h2><p className="mt-1 text-sm text-muted-foreground">Shown to colleagues in this firm.</p><div className="mt-6"><ProfileForm email={workspace.user.email ?? ""} fullName={me?.full_name ?? ""} phone={me?.phone ?? ""} /></div></section>
       <section className="rounded-xl border border-border bg-card p-4 shadow-sm sm:p-6"><h2 className="text-lg font-semibold text-primary">Firm profile</h2><p className="mt-1 text-sm text-muted-foreground">These details appear in the workspace and at the foot of generated drafts.</p><div className="mt-6"><FirmSettingsForm canEdit={workspace.membership.role === "owner"} firm={workspace.firm} /></div></section>
       <section className="rounded-xl border border-border bg-card shadow-sm">

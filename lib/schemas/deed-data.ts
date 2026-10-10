@@ -70,6 +70,8 @@ export const partySchema = z.object({
     .or(z.literal("")),
   capacity: text(120),
   representedBy: text(600),
+  /** Uploaded ID papers (Aadhaar, PAN…) for this person, as deed_documents ids. */
+  documentIds: z.array(z.string().uuid()).max(10).default([]),
 });
 
 /* -------------------------------------------------------------- Properties */
@@ -85,6 +87,16 @@ export const propertySchema = z.object({
   description: z.string().trim().min(3, "Describe the property.").max(1000),
   identifier: text(160),
   khasra: text(160),
+  plotNo: text(60),
+  houseNo: text(60),
+  flatNo: text(40),
+  floor: text(40),
+  wardNo: text(40),
+  surveyNo: text(80),
+  khataNo: text(80),
+  khatauniNo: text(80),
+  pattaNo: text(80),
+  plotDimensions: text(120),
   area: optionalNumber,
   areaUnit: areaUnitSchema,
   locality: text(200),
@@ -103,6 +115,8 @@ export const propertySchema = z.object({
   construction: text(1500),
   constructionType: text(80),
   builtUpArea: optionalNumber,
+  carpetArea: optionalNumber,
+  superBuiltUpArea: optionalNumber,
   constructionYear: text(20),
   road: text(160),
   corner: z.boolean().default(false),
@@ -223,6 +237,55 @@ export const executionSchema = z.object({
   mapAttached: z.boolean().default(true),
 });
 
+/* ------------------------------------------- Custom document (library template) */
+
+export const customDraftSchema = z.object({
+  title: z.string().trim().max(300).default(""),
+  paragraphs: z.array(z.string().max(12000)).max(600).default([]),
+  generatedAt: z.string().max(40).optional(),
+  edited: z.boolean().default(false),
+});
+
+/** A document started from the template library: the template, the form answers and saved drafts. */
+export const customDocSchema = z.object({
+  templateId: z.string().min(1).max(120),
+  title: z.string().max(300).default(""),
+  answers: z.record(z.string().max(6000)).default({}),
+  drafts: z.object({ english: customDraftSchema.optional(), hindi: customDraftSchema.optional() }).default({}),
+});
+
+/* ------------------------------------------------------- AI-managed sections */
+
+/** Names, addresses and other typed values converted to the other script, per draft language. */
+export const localizedSchema = z.object({
+  hindi: z.record(z.string().max(8000)).default({}),
+  english: z.record(z.string().max(8000)).default({}),
+});
+
+const aiEditSchema = z.object({
+  op: z.enum(["replace", "insert_after", "delete"]),
+  index: z.number().int().min(-1).max(5000),
+  text: z.string().max(12000).optional(),
+});
+
+/** AI refinement of the standard draft, stored as edits tied to the exact draft they were made for. */
+export const aiDraftVersionSchema = z.object({
+  baseHash: z.string().max(40),
+  edits: z.array(aiEditSchema).max(400),
+  notes: z.array(z.string().max(600)).max(20).default([]),
+  generatedAt: z.string().max(40),
+});
+
+export const aiDraftSchema = z.object({ hindi: aiDraftVersionSchema.optional(), english: aiDraftVersionSchema.optional() });
+
+export const chatMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  text: z.string().max(20000),
+  at: z.string().max(40),
+  clauses: z.array(z.string().max(4000)).max(10).optional(),
+  remember: z.string().max(1000).optional(),
+});
+
 /* --------------------------------------------------------------- Aggregate */
 
 /** Parses an array item by item so one malformed record never discards the rest. */
@@ -250,6 +313,10 @@ export const deedDataSchema = z.object({
   payments: lenientArray(paymentSchema, 60),
   terms: termsSchema.catch(emptyTerms),
   execution: executionSchema.catch(emptyExecution),
+  custom: customDocSchema.optional().catch(undefined),
+  localized: localizedSchema.catch({ hindi: {}, english: {} }),
+  aiDraft: aiDraftSchema.catch({}),
+  chat: lenientArray(chatMessageSchema, 60),
 });
 
 export const sectionSchemas = {
@@ -287,10 +354,16 @@ export type Consideration = z.infer<typeof considerationSchema>;
 export type Terms = z.infer<typeof termsSchema>;
 export type Execution = z.infer<typeof executionSchema>;
 export type DeedData = z.infer<typeof deedDataSchema>;
+export type CustomDoc = z.infer<typeof customDocSchema>;
+export type Localized = z.infer<typeof localizedSchema>;
+export type AiDraftVersion = z.infer<typeof aiDraftVersionSchema>;
+export type AiEdit = z.infer<typeof aiEditSchema>;
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export type CustomDraft = z.infer<typeof customDraftSchema>;
 export type PartyRole = z.infer<typeof partyRoleSchema>;
 
 export function emptyDeedData(): DeedData {
-  return { version: DEED_DATA_VERSION, parties: [], properties: [], titleChain: [], consideration: {}, payments: [], terms: emptyTerms, execution: emptyExecution };
+  return { version: DEED_DATA_VERSION, parties: [], properties: [], titleChain: [], consideration: {}, payments: [], terms: emptyTerms, execution: emptyExecution, localized: { hindi: {}, english: {} }, aiDraft: {}, chat: [] };
 }
 
 export function parseDeedData(value: unknown): DeedData {

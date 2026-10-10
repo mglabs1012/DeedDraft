@@ -6,6 +6,7 @@
  */
 
 import { propertyKindHindi } from "@/lib/deeds";
+import { isValidAadhaar } from "@/lib/text/aadhaar";
 import {
   paymentSchema,
   partySchema,
@@ -78,7 +79,8 @@ const unitMap: Record<string, Property["areaUnit"]> = {
 
 const roles = new Set(["first", "second", "other", "witness"]);
 
-function normaliseParty(raw: Loose): Party | null {
+export function normaliseParty(raw: Loose): Party | null {
+  raw = { ...raw, documentIds: [] };
   const relation = relationMap[str(raw.relation).toLowerCase()] ?? "S/o";
   const genderText = str(raw.gender).toLowerCase();
   const gender = genderText === "female" || genderText === "f" || genderText === "महिला" || relation === "W/o" || relation === "D/o" ? "female" : "male";
@@ -106,7 +108,8 @@ function normaliseParty(raw: Loose): Party | null {
 const kinds = new Set(["plot", "house", "flat", "shop", "office", "agricultural", "industrial", "other"]);
 const uses = new Set(["residential", "commercial", "agricultural", "industrial", "mixed"]);
 
-function normaliseProperty(raw: Loose): Property | null {
+export function normaliseProperty(input: Loose): Property | null {
+  const raw = str(input.identifier) ? input : { ...input, identifier: str(input.flatNo) || str(input.houseNo) || str(input.plotNo) };
   const unit = unitMap[str(raw.areaUnit).toLowerCase()] ?? "sq_yd";
   const kind = (kinds.has(str(raw.kind)) ? str(raw.kind) : "other") as Property["kind"];
   const fallback = propertyKindHindi[kind] + (str(raw.identifier) ? " संख्या " + str(raw.identifier) : "");
@@ -117,6 +120,16 @@ function normaliseProperty(raw: Loose): Property | null {
     description: str(raw.description).length >= 3 ? str(raw.description) : fallback,
     identifier: str(raw.identifier),
     khasra: str(raw.khasra),
+    plotNo: str(raw.plotNo),
+    houseNo: str(raw.houseNo),
+    flatNo: str(raw.flatNo),
+    floor: str(raw.floor),
+    wardNo: str(raw.wardNo),
+    surveyNo: str(raw.surveyNo),
+    khataNo: str(raw.khataNo),
+    khatauniNo: str(raw.khatauniNo),
+    pattaNo: str(raw.pattaNo),
+    plotDimensions: str(raw.plotDimensions),
     area: toNumber(raw.area),
     areaUnit: unit,
     locality: str(raw.locality),
@@ -135,6 +148,8 @@ function normaliseProperty(raw: Loose): Property | null {
     construction: str(raw.construction),
     constructionType: str(raw.constructionType),
     builtUpArea: toNumber(raw.builtUpArea),
+    carpetArea: toNumber(raw.carpetArea),
+    superBuiltUpArea: toNumber(raw.superBuiltUpArea),
     road: str(raw.road),
     corner: raw.corner === true,
     marketValue: toNumber(raw.marketValue),
@@ -190,17 +205,25 @@ export type Extraction = Pick<DeedData, "parties" | "properties" | "titleChain" 
 
 const keep = <T,>(items: Array<T | null>) => items.filter((item): item is T => item !== null);
 
+/** OCR checks the model cannot do reliably: Aadhaar check digits. */
+export function identityWarnings(parties: Party[]) {
+  return parties
+    .filter((party) => party.aadhaar && !isValidAadhaar(party.aadhaar))
+    .map((party) => "Aadhaar of " + party.fullName + " fails the Aadhaar check-digit test — one digit is probably misread. Compare it with the card.");
+}
+
 export function normaliseExtraction(value: unknown): Extraction {
   const raw = obj(value);
   const consideration = considerationSchema.safeParse({ total: toNumber(obj(raw.consideration).total), marketValue: toNumber(obj(raw.consideration).marketValue) });
+  const parties = keep(list(raw.parties).map(normaliseParty)).slice(0, 50);
   return {
-    parties: keep(list(raw.parties).map(normaliseParty)).slice(0, 50),
+    parties,
     properties: keep(list(raw.properties).map(normaliseProperty)).slice(0, 25),
     titleChain: keep(list(raw.titleChain).map(normaliseTitle)).slice(0, 25),
     payments: keep(list(raw.payments).map(normalisePayment)).slice(0, 60),
     consideration: consideration.success ? consideration.data : {},
     summary: str(raw.summary).slice(0, 1000),
-    warnings: (Array.isArray(raw.warnings) ? raw.warnings : []).map(str).filter(Boolean).slice(0, 20),
+    warnings: [...identityWarnings(parties), ...(Array.isArray(raw.warnings) ? raw.warnings : []).map(str).filter(Boolean)].slice(0, 20),
   };
 }
 

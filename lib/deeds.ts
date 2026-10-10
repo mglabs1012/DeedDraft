@@ -174,6 +174,11 @@ export const activityLabels: Record<string, string> = {
   ai_extracted_document: "AI extracted a document",
   ai_drafted_clauses: "AI drafted clauses",
   ai_reviewed_deed: "AI reviewed the matter",
+  ai_filled_party: "AI filled a party from ID papers",
+  ai_filled_property: "AI filled a property from its papers",
+  updated_custom_details: "Document details updated",
+  edited_custom_draft: "Draft text edited",
+  ai_drafted_document: "AI prepared the draft",
 };
 
 export function activityLabel(action: string) {

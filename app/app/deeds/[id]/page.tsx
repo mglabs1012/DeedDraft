@@ -1,16 +1,17 @@
 import { notFound } from "next/navigation";
 
 import { DeedDetail } from "@/components/deeds/deed-detail";
-import { isAiConfigured } from "@/lib/ai/openrouter";
+import { isAiConfigured } from "@/lib/ai/claude";
 import { parseDeedData } from "@/lib/schemas/deed-data";
+import { getLibraryEntry, getTemplateText } from "@/lib/templates/library.server";
 import { getCurrentWorkspace } from "@/lib/workspace";
 import type { Database, Deed } from "@/types/database";
 
 type Document = Database["public"]["Tables"]["deed_documents"]["Row"];
 type Activity = Database["public"]["Tables"]["activity_log"]["Row"];
 
-// AI extraction of scanned papers can take a while.
-export const maxDuration = 120;
+// AI extraction of scanned papers and drafting long templates can take a while.
+export const maxDuration = 300;
 
 export default async function DeedDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -25,6 +26,10 @@ export default async function DeedDetailPage({ params }: { params: Promise<{ id:
 
   if (!deedResult.data) notFound();
 
+  const initialData = parseDeedData(deedResult.data.data);
+  const entry = getLibraryEntry(initialData.custom?.templateId);
+  const templateText = entry ? await getTemplateText(entry.id) : null;
+
   return (
     <DeedDetail
       aiEnabled={isAiConfigured()}
@@ -34,7 +39,8 @@ export default async function DeedDetailPage({ params }: { params: Promise<{ id:
       firmCity={workspace.firm.city}
       firmId={workspace.firm.id}
       firmName={workspace.firm.name}
-      initialData={parseDeedData(deedResult.data.data)}
+      initialData={initialData}
+      template={entry && templateText ? { entry, text: templateText } : null}
     />
   );
 }

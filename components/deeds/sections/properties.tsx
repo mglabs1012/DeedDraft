@@ -5,6 +5,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
 import { Building2, MapPin, Plus } from "lucide-react";
 
+import { AutofillPanel, fillForm } from "@/components/deeds/ai/autofill-panel";
+import type { AiTarget } from "@/components/deeds/sections/parties";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass, textareaClass } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
@@ -15,7 +17,7 @@ import { propertySchema, type Party, type Property } from "@/lib/schemas/deed-da
 
 import { CheckboxField, Empty, FormGroup, RowActions, SectionHeader, SubmitFooter, cardClass, useListEditor, type SaveSection } from "./shared";
 
-export function PropertiesSection({ deedType, properties, parties, save }: { deedType: DeedType; properties: Property[]; parties: Party[]; save: SaveSection }) {
+export function PropertiesSection({ deedType, properties, parties, save, ai = null }: { deedType: DeedType; properties: Property[]; parties: Party[]; save: SaveSection; ai?: AiTarget }) {
   const editor = useListEditor(properties, (next) => save("properties", next));
   const allotment = getDeedType(deedType).allotment;
   const allottees = parties.filter((party) => party.role === "first" || party.role === "second");
@@ -44,8 +46,13 @@ export function PropertiesSection({ deedType, properties, parties, save }: { dee
                     </p>
                     <p className="mt-1 break-words font-semibold leading-6 text-primary">{[property.identifier, property.description].filter(Boolean).join(" — ")}</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {[property.khasra ? "Khasra " + property.khasra : "", property.area ? areaTriple(property, "english") : ""].filter(Boolean).join(" · ")}
+                      {[property.khasra ? "Khasra " + property.khasra : "", property.area ? areaTriple(property, "english") : "", property.plotDimensions].filter(Boolean).join(" · ")}
                     </p>
+                    {recordChips(property).length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                        {recordChips(property).map((chip) => <span className="rounded bg-secondary px-2 py-0.5" key={chip}>{chip}</span>)}
+                      </div>
+                    ) : null}
                     {property.locality || property.village || property.district ? (
                       <p className="mt-1 flex items-start gap-1 text-sm text-foreground/80">
                         <MapPin className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
@@ -93,6 +100,7 @@ export function PropertiesSection({ deedType, properties, parties, save }: { dee
       >
         {editor.editing !== null ? (
           <PropertyForm
+            ai={ai}
             allottees={allotment ? allottees : []}
             initial={editor.editing === "new" ? undefined : editor.editing}
             key={editor.editing === "new" ? "new" : editor.editing.id}
@@ -102,6 +110,25 @@ export function PropertiesSection({ deedType, properties, parties, save }: { dee
       </Modal>
     </section>
   );
+}
+
+const recordFields = [
+  ["plotNo", "Plot"],
+  ["houseNo", "House"],
+  ["flatNo", "Flat"],
+  ["floor", "Floor"],
+  ["wardNo", "Ward"],
+  ["surveyNo", "Survey"],
+  ["khataNo", "Khata"],
+  ["khatauniNo", "Khatauni"],
+  ["pattaNo", "Patta"],
+] as const;
+
+function recordChips(property: Property) {
+  const chips = recordFields.filter(([key]) => property[key]).map(([key, label]) => label + " " + property[key]);
+  if (property.carpetArea) chips.push("Carpet " + property.carpetArea + " sq ft");
+  if (property.superBuiltUpArea) chips.push("Super built-up " + property.superBuiltUpArea + " sq ft");
+  return chips;
 }
 
 function Boundary({ label, value, size }: { label: string; value?: string; size?: string }) {
@@ -120,7 +147,7 @@ const sides = [
   ["south", "दक्षिण / South", "e.g. भूखण्ड संख्या 40"],
 ] as const;
 
-function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; allottees: Party[]; onSubmit: (property: Property) => void }) {
+function PropertyForm({ initial, allottees, onSubmit, ai }: { initial?: Property; allottees: Party[]; onSubmit: (property: Property) => void; ai: AiTarget }) {
   const form = useForm<z.input<typeof propertySchema>, unknown, Property>({
     resolver: zodResolver(propertySchema),
     defaultValues: initial ?? {
@@ -130,6 +157,16 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
       description: "",
       identifier: "",
       khasra: "",
+      plotNo: "",
+      houseNo: "",
+      flatNo: "",
+      floor: "",
+      wardNo: "",
+      surveyNo: "",
+      khataNo: "",
+      khatauniNo: "",
+      pattaNo: "",
+      plotDimensions: "",
       area: "",
       areaUnit: "sq_yd",
       locality: "",
@@ -148,6 +185,8 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
       construction: "",
       constructionType: "",
       builtUpArea: "",
+      carpetArea: "",
+      superBuiltUpArea: "",
       constructionYear: "",
       road: "",
       corner: false,
@@ -162,6 +201,17 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
 
   return (
     <form className="space-y-4" id="property-form" noValidate onSubmit={form.handleSubmit(onSubmit)}>
+      {ai ? (
+        <AutofillPanel
+          category="naksha_map"
+          deedId={ai.deedId}
+          description="Upload the naksha, site or layout plan, patta, jamabandi or khatauni. Boundaries, side measurements, areas, plot / khasra / khata numbers and land use are filled in for you to check."
+          firmId={ai.firmId}
+          onResult={(result) => (result.property ? fillForm(form, result.property, initial ? [] : ["kind", "landUse", "areaUnit"]) : 0)}
+          target="property"
+          title="Fill from naksha, map or layout plan"
+        />
+      ) : null}
       <FormGroup title="Identification">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Type">
@@ -169,7 +219,7 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
               {Object.entries(propertyKindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </Field>
-          <Field label="Use">
+          <Field label="Land use">
             <select className={inputClass} {...form.register("landUse")}>
               {Object.entries(landUseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
@@ -187,6 +237,38 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
         <Field className="sm:col-span-2" error={errors.description?.message} label="Short description">
           <textarea className={textareaClass + " min-h-16"} placeholder="e.g. आवासीय भूखण्ड (दक्षिणी भाग)" {...form.register("description")} />
         </Field>
+      </FormGroup>
+
+      <FormGroup description="fill what appears on the papers" title="Record numbers">
+        <div className="grid grid-cols-2 gap-2 sm:col-span-2 sm:grid-cols-3">
+          <Field label="Plot no.">
+            <input className={inputClass} {...form.register("plotNo")} />
+          </Field>
+          <Field label="House no.">
+            <input className={inputClass} {...form.register("houseNo")} />
+          </Field>
+          <Field label="Flat no.">
+            <input className={inputClass} {...form.register("flatNo")} />
+          </Field>
+          <Field label="Floor">
+            <input className={inputClass} placeholder="e.g. भूतल" {...form.register("floor")} />
+          </Field>
+          <Field label="Ward no.">
+            <input className={inputClass} {...form.register("wardNo")} />
+          </Field>
+          <Field label="Survey no.">
+            <input className={inputClass} {...form.register("surveyNo")} />
+          </Field>
+          <Field hint="खाता" label="Khata no.">
+            <input className={inputClass} {...form.register("khataNo")} />
+          </Field>
+          <Field hint="खतौनी" label="Khatauni no.">
+            <input className={inputClass} {...form.register("khatauniNo")} />
+          </Field>
+          <Field label="Patta no.">
+            <input className={inputClass} {...form.register("pattaNo")} />
+          </Field>
+        </div>
       </FormGroup>
 
       <FormGroup title="Location & area">
@@ -212,6 +294,9 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
             </select>
           </Field>
         </div>
+        <Field hint="overall size" label="Plot dimensions">
+          <input className={inputClass} placeholder={"e.g. 30' x 50'"} {...form.register("plotDimensions")} />
+        </Field>
         {preview ? <p className="rounded-lg bg-secondary/60 px-3 py-2 text-xs text-secondary-foreground sm:col-span-2">{preview}</p> : null}
         <Field error={errors.marketValue?.message} hint="₹, optional" label="DLC market value">
           <input className={inputClass} inputMode="decimal" {...form.register("marketValue")} />
@@ -244,12 +329,18 @@ function PropertyForm({ initial, allottees, onSubmit }: { initial?: Property; al
         <Field label="Construction type">
           <input className={inputClass} placeholder="e.g. आर.सी.सी." {...form.register("constructionType")} />
         </Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field hint="sq. ft." label="Built-up area">
+        <Field label="Year built">
+          <input className={inputClass} inputMode="numeric" {...form.register("constructionYear")} />
+        </Field>
+        <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-3 sm:col-span-2">
+          <Field error={errors.builtUpArea?.message} hint="sq. ft." label="Built-up area">
             <input className={inputClass} inputMode="decimal" {...form.register("builtUpArea")} />
           </Field>
-          <Field label="Year built">
-            <input className={inputClass} inputMode="numeric" {...form.register("constructionYear")} />
+          <Field error={errors.carpetArea?.message} hint="sq. ft." label="Carpet area">
+            <input className={inputClass} inputMode="decimal" {...form.register("carpetArea")} />
+          </Field>
+          <Field error={errors.superBuiltUpArea?.message} hint="sq. ft." label="Super built-up">
+            <input className={inputClass} inputMode="decimal" {...form.register("superBuiltUpArea")} />
           </Field>
         </div>
       </FormGroup>

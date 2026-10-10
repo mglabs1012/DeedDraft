@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
-import { Building, Plus, UserRound, Users } from "lucide-react";
+import { Building, FileText, Plus, Sparkles, UserRound, Users } from "lucide-react";
+import { toast } from "sonner";
 
+import { createDocumentSignedUrl } from "@/app/actions/documents";
+
+import { AutofillPanel, fillForm } from "@/components/deeds/ai/autofill-panel";
+import { isValidAadhaar } from "@/lib/text/aadhaar";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass, textareaClass } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
@@ -17,7 +22,18 @@ import { CheckboxField, Empty, FormGroup, RowActions, SectionHeader, SubmitFoote
 
 const order: PartyRole[] = ["first", "second", "other", "witness"];
 
-export function PartiesSection({ deedType, parties, save }: { deedType: DeedType; parties: Party[]; save: SaveSection }) {
+export type AiTarget = { deedId: string; firmId: string } | null;
+
+export type DocumentNames = Record<string, string>;
+
+function openDocument(id: string) {
+  void createDocumentSignedUrl({ id }).then((result) => {
+    if (result.error || !result.url) return toast.error(result.error ?? "Could not open document.");
+    window.open(result.url, "_blank", "noopener,noreferrer");
+  });
+}
+
+export function PartiesSection({ deedType, parties, save, ai = null, documentNames = {} }: { deedType: DeedType; parties: Party[]; save: SaveSection; ai?: AiTarget; documentNames?: DocumentNames }) {
   const roles = getDeedType(deedType).roles;
   const editor = useListEditor(parties, (next) => save("parties", next));
   const [defaultRole, setDefaultRole] = useState<PartyRole>("first");
@@ -30,7 +46,12 @@ export function PartiesSection({ deedType, parties, save }: { deedType: DeedType
   return (
     <section className={cardClass}>
       <SectionHeader
-        action={<Button className="h-9" onClick={() => add("first")} type="button"><Plus className="size-4" /> Add party</Button>}
+        action={
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {ai ? <Button className="h-9" onClick={() => add("first")} type="button" variant="outline"><Sparkles className="size-4" /> Add from Aadhaar / PAN</Button> : null}
+            <Button className="h-9" onClick={() => add("first")} type="button"><Plus className="size-4" /> Add party</Button>
+          </div>
+        }
         description={roles.first.en + " (" + roles.first.hi.m + "), " + roles.second.en.toLowerCase() + " (" + roles.second.hi.m + ") and witnesses."}
         title="Parties"
       />
@@ -69,6 +90,11 @@ export function PartiesSection({ deedType, parties, save }: { deedType: DeedType
                             {party.gstin ? <span className="rounded bg-secondary px-2 py-0.5 font-mono">GSTIN {party.gstin}</span> : null}
                             {party.phone ? <span className="rounded bg-secondary px-2 py-0.5">{party.phone}</span> : null}
                             {party.representedBy ? <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-800">Through representative</span> : null}
+                            {party.documentIds.filter((id) => documentNames[id]).map((id) => (
+                              <button className="inline-flex max-w-full items-center gap-1 rounded border border-border px-2 py-0.5 text-primary hover:bg-secondary" key={id} onClick={() => openDocument(id)} title="Open document" type="button">
+                                <FileText className="size-3 shrink-0" /><span className="truncate">{documentNames[id]}</span>
+                              </button>
+                            ))}
                           </div>
                         </div>
                         <RowActions disabled={editor.pending} label={party.fullName} onDelete={() => editor.remove(party, party.fullName)} onEdit={() => editor.setEditing(party)} />
@@ -85,7 +111,7 @@ export function PartiesSection({ deedType, parties, save }: { deedType: DeedType
       ) : (
         <Empty
           action={<Button className="h-9" onClick={() => add("first")} type="button"><Plus className="size-4" /> Add {roles.first.en.toLowerCase()}</Button>}
-          description={"Add the " + roles.first.en.toLowerCase() + ", " + roles.second.en.toLowerCase() + " and two witnesses. For Hindi drafts, type names and addresses in Hindi."}
+          description={"Add the " + roles.first.en.toLowerCase() + ", " + roles.second.en.toLowerCase() + " and two witnesses. Type in Hindi or English — the draft converts names and addresses to its language automatically."}
           icon={Users}
           title="No parties yet"
         />
@@ -99,6 +125,7 @@ export function PartiesSection({ deedType, parties, save }: { deedType: DeedType
       >
         {editor.editing !== null ? (
           <PartyForm
+            ai={ai}
             defaultRole={defaultRole}
             initial={editor.editing === "new" ? undefined : editor.editing}
             key={editor.editing === "new" ? "new" : editor.editing.id}
@@ -111,7 +138,7 @@ export function PartiesSection({ deedType, parties, save }: { deedType: DeedType
   );
 }
 
-function PartyForm({ initial, defaultRole, roleLabels, onSubmit }: { initial?: Party; defaultRole: PartyRole; roleLabels: Record<PartyRole, string>; onSubmit: (party: Party) => void }) {
+function PartyForm({ initial, defaultRole, roleLabels, onSubmit, ai }: { initial?: Party; defaultRole: PartyRole; roleLabels: Record<PartyRole, string>; onSubmit: (party: Party) => void; ai: AiTarget }) {
   const form = useForm<z.input<typeof partySchema>, unknown, Party>({
     resolver: zodResolver(partySchema),
     defaultValues: initial ?? {
@@ -136,13 +163,30 @@ function PartyForm({ initial, defaultRole, roleLabels, onSubmit }: { initial?: P
       gstin: "",
       capacity: "",
       representedBy: "",
+      documentIds: [],
     },
   });
   const errors = form.formState.errors;
+  const aadhaarValue = useWatch({ control: form.control, name: "aadhaar" }) ?? "";
   const [showOrg, setShowOrg] = useState(Boolean(initial?.organisation || initial?.representedBy));
 
   return (
     <form className="space-y-4" id="party-form" noValidate onSubmit={form.handleSubmit(onSubmit)}>
+      {ai ? (
+        <AutofillPanel
+          category="id_proof"
+          deedId={ai.deedId}
+          description="Upload this person's Aadhaar (front and back), PAN, voter ID or passport. Name, relation, age, address, Aadhaar and PAN are filled in for you to check."
+          firmId={ai.firmId}
+          getRole={() => form.getValues("role")}
+          onResult={(result, documentIds) => {
+            form.setValue("documentIds", [...new Set([...(form.getValues("documentIds") ?? []), ...documentIds])].slice(0, 10), { shouldDirty: true });
+            return result.party ? fillForm(form, result.party, initial ? [] : ["gender", "relation"]) : 0;
+          }}
+          target="party"
+          title="Fill from Aadhaar, PAN or ID"
+        />
+      ) : null}
       <FormGroup title="Identity">
         <Field label="Role">
           <select className={inputClass} {...form.register("role")}>
@@ -213,7 +257,7 @@ function PartyForm({ initial, defaultRole, roleLabels, onSubmit }: { initial?: P
         <Field className="sm:col-span-2" error={errors.address?.message} label="Residential address">
           <textarea className={textareaClass + " min-h-20"} placeholder="e.g. मकान नम्बर 374, अर्जुन लाल सेठी नगर, परबतपुरा, अजमेर (राज.)" {...form.register("address")} />
         </Field>
-        <Field error={errors.aadhaar?.message} hint="optional" label="Aadhaar">
+        <Field error={errors.aadhaar?.message ?? (aadhaarValue && /^\d{4}\s?\d{4}\s?\d{4}$/.test(aadhaarValue.trim()) && !isValidAadhaar(aadhaarValue) ? "This number fails the Aadhaar check — please re-check the digits." : undefined)} hint="optional" label="Aadhaar">
           <input className={inputClass + " font-mono"} inputMode="numeric" placeholder="1234 5678 9012" {...form.register("aadhaar")} />
         </Field>
         <Field error={errors.pan?.message} hint="optional" label="PAN">

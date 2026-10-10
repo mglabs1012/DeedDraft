@@ -47,6 +47,11 @@ export type Database = {
         { id?: string; firm_id: string; deed_id?: string | null; user_id: string; action: string; details?: Json; created_at?: string },
         { id?: string; firm_id?: string; deed_id?: string | null; user_id?: string; action?: string; details?: Json; created_at?: string }
       >;
+      ai_memory: Table<
+        { id: string; firm_id: string; kind: "note" | "reference"; deed_type: Database["public"]["Enums"]["deed_type"] | null; language: "hindi" | "english" | null; title: string; content: string; source: "manual" | "upload" | "finalized" | "ai" | "chat"; enabled: boolean; created_by: string; created_at: string; updated_at: string },
+        { id?: string; firm_id: string; kind: "note" | "reference"; deed_type?: Database["public"]["Enums"]["deed_type"] | null; language?: "hindi" | "english" | null; title?: string; content: string; source?: "manual" | "upload" | "finalized" | "ai" | "chat"; enabled?: boolean; created_by: string; created_at?: string; updated_at?: string },
+        { id?: string; firm_id?: string; kind?: "note" | "reference"; deed_type?: Database["public"]["Enums"]["deed_type"] | null; language?: "hindi" | "english" | null; title?: string; content?: string; source?: "manual" | "upload" | "finalized" | "ai" | "chat"; enabled?: boolean; created_by?: string; created_at?: string; updated_at?: string }
+      >;
       firm_deed_counters: Table<
         { firm_id: string; reference_year: number; last_number: number },
         { firm_id: string; reference_year: number; last_number?: number },
@@ -75,3 +80,4 @@ export type Database = {
 export type Deed = Database["public"]["Tables"]["deeds"]["Row"];
 export type Firm = Database["public"]["Tables"]["firms"]["Row"];
 export type FirmMember = Database["public"]["Tables"]["firm_members"]["Row"];
+export type AiMemory = Database["public"]["Tables"]["ai_memory"]["Row"];

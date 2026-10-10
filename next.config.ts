@@ -10,6 +10,12 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Template library text is read from disk by server code; include it in the server build.
+  outputFileTracingIncludes: { "/app/**": ["./data/template-library/**", "./data/reference-drafts.json"] },
+  experimental: {
+    // Reference drafts (PDF/Word up to 20 MB) are sent straight to a server action.
+    serverActions: { bodySizeLimit: "21mb" },
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

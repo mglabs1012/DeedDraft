@@ -6,15 +6,28 @@
 import assert from "node:assert/strict";
 
 import { mergeExtraction } from "../lib/ai/contract";
-import { normaliseClauses, normaliseExtraction, normaliseReview, parseJsonResponse, toIsoDate, toNumber } from "../lib/ai/parse";
-import { clausePrompt, extractionPrompt, reviewPrompt } from "../lib/ai/prompts";
+import { normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, parseJsonResponse, toIsoDate, toNumber } from "../lib/ai/parse";
+import { clausePrompt, extractionPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "../lib/ai/prompts";
 import { deedTypeOrder, deedTypes } from "../lib/deed-types";
-import { buildDraft, draftChoices, getReadiness, rentSchedule } from "../lib/drafting";
+import { buildDraft, buildDraftDocuments, draftChoices, getReadiness, rentSchedule } from "../lib/drafting";
 import { areaTriple, hindiTerm, moneyHi } from "../lib/drafting/format";
 import { hindiLongDate, hindiWords, termEndDate } from "../lib/drafting/hindi";
 import { parseDeedData, type DeedData, type Party } from "../lib/schemas/deed-data";
 import { estimateStampDuty } from "../lib/stamp-duty";
 import { krutiDevToUnicode, looksLikeKrutiDev } from "../lib/text/krutidev";
+
+import libraryIndexJson from "../lib/templates/library-index.json";
+import { categoryById, coreItems, libraryItems, popularLibraryIds, searchCatalog, type LibraryEntry } from "../lib/templates/catalog";
+import { formFields, formFor, labelledAnswers } from "../lib/templates/forms";
+import { customDraftHtml, textToParagraphs } from "../lib/templates/render";
+
+import { createRedactor } from "../lib/ai/redact";
+import { renderDraftHtml } from "../lib/drafting/blocks";
+import { convertText, localizeData, needsConversion, pendingConversions } from "../lib/drafting/localize";
+import { applyEdits, blockSegments, hashSegments, keepsParticulars } from "../lib/drafting/segments";
+import { isValidAadhaar, verhoeffDigit } from "../lib/text/aadhaar";
+
+const libraryIndex = libraryIndexJson as LibraryEntry[];
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -238,6 +251,147 @@ test("AI: prompts carry deed roles and injection guardrails", () => {
     assert.ok(clausePrompt(type, "hindi").includes("यह कि"));
     assert.ok(reviewPrompt(type).includes("194-IA"));
   }
+});
+
+test("AI: naksha fields are read and reach the drafted schedule", () => {
+  const property = normaliseProperty({
+    kind: "flat", landUse: "residential", flatNo: "B-204", floor: "द्वितीय तल", wardNo: "17", khataNo: "45", khatauniNo: "112", pattaNo: "P/2019/88",
+    plotDimensions: "30 x 50 ft", area: "150", areaUnit: "sq yd", carpetArea: "850", superBuiltUpArea: "1,150 sq ft", east: "20 फुट रोड", eastSize: "30 ft",
+  });
+  assert.ok(property);
+  assert.equal(property.identifier, "B-204");
+  assert.equal(property.superBuiltUpArea, 1150);
+  assert.equal(property.areaUnit, "sq_yd");
+  const data = { ...sample, properties: [property] };
+  const hi = buildDraft({ type: "sale", title: "T", referenceNo: "DD-3", data, firmName: "Firm", firmCity: "Ajmer" }, "hindi").html;
+  assert.ok(hi.includes("खतौनी संख्या 112"));
+  assert.ok(hi.includes("पट्टा संख्या P/2019/88"));
+  assert.ok(hi.includes("का माप 30 x 50 ft है"));
+  assert.ok(!hi.includes("फ्लैट नम्बर B-204"), "identifier is not repeated in record particulars");
+  const en = buildDraft({ type: "sale", title: "T", referenceNo: "DD-3", data, firmName: "Firm", firmCity: "Ajmer" }, "english").html;
+  assert.ok(en.includes("Ward No. 17"));
+  assert.ok(en.includes("carpet area 850 sq. ft."));
+  assert.ok(en.includes("super built-up area 1150 sq. ft."));
+});
+
+test("AI: ID papers become one party; masked Aadhaar is dropped", () => {
+  const party = normaliseParty({ role: "second", fullName: "सीमा देवी", relation: "W/O", relativeName: "राम लाल", age: "42", aadhaar: "XXXX XXXX 1234", pan: "abcde1234f" });
+  assert.ok(party);
+  assert.equal(party.gender, "female");
+  assert.equal(party.aadhaar, "");
+  assert.equal(party.pan, "ABCDE1234F");
+  assert.ok(partyDocsPrompt("sale", "Buyer").includes("Aadhaar"));
+  assert.ok(propertyDocsPrompt("sale").includes("khatauniNo"));
+});
+
+test("Template library: built, unique, curated picks exist, no personal deeds", () => {
+  const ids = new Set(libraryIndex.map((entry) => entry.id));
+  assert.ok(libraryIndex.length > 900, "library has " + libraryIndex.length + " templates");
+  assert.equal(ids.size, libraryIndex.length);
+  for (const id of popularLibraryIds) assert.ok(ids.has(id), "popular template missing: " + id);
+  assert.ok(!libraryIndex.some((entry) => /rakesh singh|vikray patra/i.test(entry.title)));
+  for (const entry of libraryIndex) assert.ok(categoryById[entry.category], entry.id);
+});
+
+test("Template search: built-in deeds first, Hindi and Hinglish words match", () => {
+  const items = [...coreItems(), ...libraryItems(libraryIndex)];
+  assert.deepEqual(coreItems().map((item) => item.id), ["sale", "agreement_to_sell", "gift", "release", "partition", "will", "lease", "rent"]);
+  assert.equal(searchCatalog(items, "rent")[0].id, "rent");
+  assert.equal(searchCatalog(items, "wasiyat")[0].id, "will");
+  assert.equal(searchCatalog(items, "sale deed")[0].id, "sale");
+  assert.ok(searchCatalog(items, "किराया").some((item) => item.kind === "library" && item.category === "rent"));
+  assert.ok(searchCatalog(items, "affidavit").length > 3);
+  assert.ok(searchCatalog(items, "power attorney")[0].category === "poa");
+  assert.ok(searchCatalog(items, "", "money").every((item) => item.category === "money"));
+  assert.equal(searchCatalog(items, "zzzz-no-such-thing").length, 0);
+});
+
+test("Template forms: category questions, title extras, signing last", () => {
+  const cheque = libraryIndex.find((entry) => entry.id === "notice-under-section-138-of-the-negotiable-instruments-act-for-dishonour-of-cheq")!;
+  const sections = formFor(cheque);
+  assert.ok(sections.some((section) => section.title === "Cheque details"));
+  assert.deepEqual(sections.slice(-2).map((section) => section.title), ["Signing", "Anything else"]);
+  for (const category of Object.keys(categoryById)) {
+    const keys = formFields({ title: "X", category: category as LibraryEntry["category"] }).map((item) => item.key);
+    assert.equal(new Set(keys).size, keys.length, "duplicate keys in " + category);
+  }
+  const text = labelledAnswers(cheque, { firstName: "Ravi Kumar", chequeAmount: "50000", unknown: "x", subject: "  " });
+  assert.ok(text.includes("Full name: Ravi Kumar") && text.includes("Cheque amount: 50000") && !text.includes("unknown") && !text.includes("Subject"));
+});
+
+test("Custom documents: saved in deed data and rendered safely", () => {
+  const data = parseDeedData({ custom: { templateId: "general-power-of-attorney", title: "General Power of Attorney", answers: { firstName: "Asha" }, drafts: { english: { title: "GENERAL POWER OF ATTORNEY", paragraphs: ["KNOW ALL MEN BY THESE PRESENTS", "I, Asha <b>Devi</b>, appoint __________."] } } } });
+  assert.equal(data.custom?.answers.firstName, "Asha");
+  assert.equal(parseDeedData({ custom: { nope: true } }).custom, undefined, "bad custom data is dropped, not fatal");
+  const html = customDraftHtml({ drafts: [{ language: "english", draft: data.custom!.drafts.english! }], title: "POA", referenceNo: "DD-9" });
+  assert.ok(html.includes("GENERAL POWER OF ATTORNEY") && html.includes("&lt;b&gt;Devi&lt;/b&gt;") && !html.includes("<b>Devi"));
+  assert.deepEqual(textToParagraphs("One\nline\n\nTwo\n\n\n"), ["One line", "Two"]);
+});
+
+test("Aadhaar check digit catches a misread digit", () => {
+  const base = "53634675619";
+  const valid = base + verhoeffDigit(base);
+  assert.ok(isValidAadhaar(valid));
+  assert.ok(isValidAadhaar(valid.slice(0, 4) + " " + valid.slice(4, 8) + " " + valid.slice(8)));
+  const typo = valid.slice(0, 5) + ((Number(valid[5]) + 1) % 10) + valid.slice(6);
+  assert.ok(!isValidAadhaar(typo));
+  assert.ok(!isValidAadhaar("123456789012"), "Aadhaar never starts with 1");
+  const warned = normaliseExtraction({ parties: [{ role: "first", fullName: "Asha", aadhaar: typo }, { role: "second", fullName: "Ravi", aadhaar: valid }] });
+  assert.equal(warned.warnings.filter((item) => item.includes("check-digit")).length, 1);
+});
+
+test("Script conversion: only values in the other script, codes kept, multi-line by line", () => {
+  assert.ok(needsConversion("Kesar Devi", "hindi"));
+  assert.ok(!needsConversion("केसर देवी", "hindi"));
+  assert.ok(needsConversion("केसर देवी", "english"));
+  assert.ok(!needsConversion("B-204", "hindi") && !needsConversion("SBI", "hindi") && !needsConversion("", "hindi"));
+  const data = parseDeedData({
+    parties: [{ id: "a", role: "first", fullName: "Kesar Devi", relation: "W/o", relativeName: "Ramesh Kumar", address: "12, Shastri Nagar, Ajmer" }],
+    terms: { additionalClauses: "Seller will pay old dues.\nयह कि कब्जा दे दिया है।" },
+    execution: { place: "Ajmer" },
+    localized: { hindi: { "Kesar Devi": "केसर देवी", Ajmer: "अजमेर" } },
+  });
+  assert.deepEqual(pendingConversions(data, "hindi").sort(), ["12, Shastri Nagar, Ajmer", "Ramesh Kumar", "Seller will pay old dues."].sort());
+  assert.deepEqual(pendingConversions(data, "english"), ["यह कि कब्जा दे दिया है।"]);
+  const hindi = localizeData(data, "hindi");
+  assert.equal(hindi.parties[0].fullName, "केसर देवी");
+  assert.equal(hindi.parties[0].relativeName, "Ramesh Kumar", "unconverted values stay as typed");
+  assert.equal(hindi.execution.place, "अजमेर");
+  assert.equal(localizeData(data, "english").parties[0].fullName, "Kesar Devi");
+  assert.equal(convertText("Seller will pay old dues.\nAjmer", "hindi", { Ajmer: "अजमेर" }), "Seller will pay old dues.\nअजमेर");
+  const html = buildDraft({ type: "sale", title: "T", referenceNo: "DD-5", data, firmName: "Firm", firmCity: "Ajmer" }, "hindi").html;
+  assert.ok(html.includes("केसर देवी") && !html.includes("Kesar Devi"));
+});
+
+test("AI refinement: segments, edits, stale detection and number safety", () => {
+  const [doc] = buildDraftDocuments({ type: "sale", title: "T", referenceNo: "DD-1", data: sample, firmName: "Firm", firmCity: "Ajmer" }, "hindi");
+  const segments = blockSegments(doc.blocks);
+  assert.ok(segments.length > 10);
+  const hash = hashSegments(segments);
+  assert.equal(hashSegments(blockSegments(buildDraftDocuments({ type: "sale", title: "T", referenceNo: "DD-1", data: sample, firmName: "Firm", firmCity: "Ajmer" }, "hindi")[0].blocks)), hash, "same matter, same hash");
+  const changed = parseDeedData({ ...sample, consideration: { ...sample.consideration, total: 999999 } });
+  assert.notEqual(hashSegments(blockSegments(buildDraftDocuments({ type: "sale", title: "T", referenceNo: "DD-1", data: changed, firmName: "Firm", firmCity: "Ajmer" }, "hindi")[0].blocks)), hash, "edited matter invalidates the refinement");
+  const target = segments.find((segment) => segment.item !== undefined)!;
+  const out = blockSegments(applyEdits(doc.blocks, [
+    { op: "replace", index: target.index, text: "नया <b>पाठ</b>" },
+    { op: "insert_after", index: target.index, text: "जोड़ा गया खण्ड" },
+  ]));
+  assert.equal(out.length, segments.length + 1);
+  assert.equal(out[target.index].text, "नया <b>पाठ</b>", "edited text is escaped, not markup");
+  assert.equal(out[target.index + 1].text, "जोड़ा गया खण्ड");
+  assert.equal(blockSegments(applyEdits(doc.blocks, [{ op: "delete", index: target.index }])).length, segments.length - 1);
+  assert.ok(renderDraftHtml({ title: "x", documents: [{ language: "hindi", blocks: applyEdits(doc.blocks, [{ op: "replace", index: target.index, text: "<script>x</script>" }]) }] }).includes("&lt;script&gt;"));
+  assert.ok(keepsParticulars("राशि 4,50,000/- दिनांक 05.10.2026", "रूपये 450000/- दिनांक 05.10.2026 को"));
+  assert.ok(!keepsParticulars("राशि 4,50,000/-", "राशि 4,05,000/-"));
+});
+
+test("Redaction: identity numbers become tokens and come back unchanged", () => {
+  const redactor = createRedactor();
+  const text = "आधार 5363 4675 6192, PAN DJKPG9076C, मो. 9876543210, राशि 450000";
+  const hidden = redactor.redact(text);
+  assert.ok(!hidden.includes("5363") && !hidden.includes("DJKPG9076C") && !hidden.includes("9876543210"));
+  assert.ok(hidden.includes("450000"), "amounts are not identity numbers");
+  assert.equal(redactor.restore(hidden), text);
 });
 
 console.log("\n" + passed + " checks passed.");

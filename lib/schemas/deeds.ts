@@ -17,6 +17,8 @@ export const createDeedSchema = z.object({
   title: z.string().trim().min(3, "Enter a descriptive deed title.").max(180),
   language: deedLanguage,
   remarks: z.string().trim().max(4000).optional().or(z.literal("")),
+  /** Library template id when the deed starts from the template library. */
+  templateId: z.string().trim().max(120).optional(),
 });
 
 export const updateDeedTitleSchema = z.object({

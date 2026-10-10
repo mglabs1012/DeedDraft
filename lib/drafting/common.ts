@@ -284,18 +284,44 @@ function scheduleLeadEn(ctx: Ctx, property: Property, verb: string) {
   );
 }
 
+const recordLabels = [
+  ["plotNo", "भूखण्ड संख्या", "Plot No."],
+  ["houseNo", "मकान नम्बर", "House No."],
+  ["flatNo", "फ्लैट नम्बर", "Flat No."],
+  ["floor", "मंजिल", "Floor"],
+  ["wardNo", "वार्ड नम्बर", "Ward No."],
+  ["surveyNo", "सर्वे नम्बर", "Survey No."],
+  ["khataNo", "खाता संख्या", "Khata No."],
+  ["khatauniNo", "खतौनी संख्या", "Khatauni No."],
+  ["pattaNo", "पट्टा संख्या", "Patta No."],
+] as const;
+
+/** Municipal / revenue record numbers not already used in the property heading. */
+function recordRefs(property: Property, lang: "hindi" | "english") {
+  return recordLabels
+    .filter(([key]) => property[key] && property[key] !== property.identifier)
+    .map(([key, hi, en]) => (lang === "hindi" ? hi : en) + " " + property[key])
+    .join(", ");
+}
+
 function detailItems(ctx: Ctx, property: Property, expenses?: boolean): SafeHtml[] {
   const items: string[] = [];
   const openLand = property.kind === "plot" || property.kind === "agricultural" || property.kind === "industrial";
-  const built = property.construction || property.constructionType || property.builtUpArea;
+  const built = property.construction || property.constructionType || property.builtUpArea || property.carpetArea || property.superBuiltUpArea;
   if (ctx.hi) {
     const name = "उक्त वर्णित " + kindHi(property);
     items.push(name + " " + landUse(property, "hindi") + " प्रयोजनार्थ है।");
+    const records = recordRefs(property, "hindi");
+    if (records) items.push(name + " के अभिलेख विवरण: " + records + "।");
     if (property.area) items.push(name + " का कुल क्षेत्रफल " + areaTriple(property, "hindi") + " है।");
+    if (property.plotDimensions) items.push(name + " का माप " + property.plotDimensions + " है।");
     if (built) {
       items.push(
         name + " पर निर्माण विद्यमान है" + (property.constructionType ? " जो " + property.constructionType + " का निर्मित है" : "") +
-        (property.builtUpArea ? ", निर्मित क्षेत्रफल " + property.builtUpArea + " वर्गफुट है" : "") + (property.constructionYear ? ", निर्माण वर्ष " + property.constructionYear : "") + "।",
+        (property.builtUpArea ? ", निर्मित क्षेत्रफल " + property.builtUpArea + " वर्गफुट" : "") +
+        (property.carpetArea ? ", कारपेट क्षेत्रफल " + property.carpetArea + " वर्गफुट" : "") +
+        (property.superBuiltUpArea ? ", सुपर बिल्ट-अप क्षेत्रफल " + property.superBuiltUpArea + " वर्गफुट" : "") +
+        (property.constructionYear ? ", निर्माण वर्ष " + property.constructionYear : "") + " है।",
       );
     } else if (openLand) items.push(name + " पर किसी प्रकार का निर्माण नहीं किया हुआ है।");
     if (property.road) items.push(name + " " + property.road + " पर स्थित है।");
@@ -308,10 +334,14 @@ function detailItems(ctx: Ctx, property: Property, expenses?: boolean): SafeHtml
   } else {
     const name = "The said " + propertyKindLabels[property.kind].toLowerCase();
     items.push(name + " is for " + landUse(property, "english") + " use.");
+    const records = recordRefs(property, "english");
+    if (records) items.push("Record particulars: " + records + ".");
     if (property.area) items.push("Total area: " + areaTriple(property, "english") + ".");
+    if (property.plotDimensions) items.push("Dimensions: " + property.plotDimensions + ".");
     if (built) {
       items.push(
         "Construction exists" + (property.constructionType ? " (" + property.constructionType + ")" : "") + (property.builtUpArea ? ", built-up area " + property.builtUpArea + " sq. ft." : "") +
+        (property.carpetArea ? ", carpet area " + property.carpetArea + " sq. ft." : "") + (property.superBuiltUpArea ? ", super built-up area " + property.superBuiltUpArea + " sq. ft." : "") +
         (property.constructionYear ? ", constructed in " + property.constructionYear : "") + ".",
       );
     } else if (openLand) items.push("No construction exists on the said property.");

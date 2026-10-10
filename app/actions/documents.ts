@@ -9,7 +9,7 @@ import {
 } from "@/lib/schemas/documents";
 import { requireWorkspace } from "@/lib/workspace";
 
-type ActionResult = { error?: string; url?: string };
+type ActionResult = { error?: string; url?: string; id?: string };
 
 async function findDocument(id: string) {
   const workspace = await requireWorkspace();
@@ -43,7 +43,7 @@ export async function createDocumentRecord(input: unknown): Promise<ActionResult
     return { error: "Invalid document storage path." };
   }
 
-  const { error } = await workspace.supabase.from("deed_documents").insert({
+  const { data: created, error } = await workspace.supabase.from("deed_documents").insert({
     deed_id: parsed.data.deedId,
     firm_id: workspace.firm.id,
     category: parsed.data.category,
@@ -52,9 +52,9 @@ export async function createDocumentRecord(input: unknown): Promise<ActionResult
     mime_type: parsed.data.mimeType,
     size_bytes: parsed.data.sizeBytes,
     uploaded_by: workspace.user.id,
-  });
+  }).select("id").single();
 
-  if (error) return { error: error.message };
+  if (error || !created) return { error: error?.message ?? "Could not save the document." };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -65,7 +65,7 @@ export async function createDocumentRecord(input: unknown): Promise<ActionResult
   });
 
   revalidatePath("/app/deeds/" + parsed.data.deedId);
-  return {};
+  return { id: created.id };
 }
 
 export async function recategorizeDocument(input: unknown): Promise<ActionResult> {

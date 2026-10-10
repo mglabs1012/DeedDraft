@@ -3,6 +3,7 @@ import type { DeedData } from "@/lib/schemas/deed-data";
 
 import { renderDraftHtml, type Block, type DraftDocument } from "./blocks";
 import { createContext, paymentsTotal, type Ctx, type DraftInput } from "./common";
+import { convertText, localizeData } from "./localize";
 import { agreementToSell } from "./templates/agreement";
 import { genericDeed, partitionDeed, releaseDeed, willDeed } from "./templates/family";
 import { giftDeed } from "./templates/gift";
@@ -43,7 +44,11 @@ export function defaultDraftChoice(type: DeedType, language: "english" | "hindi"
 
 export function buildDraftDocuments(input: DraftInput, choice: DraftChoice): DraftDocument[] {
   const languages: DraftLanguage[] = choice === "both" ? getDeedType(input.type).languages : [choice];
-  return languages.map((language) => ({ language, blocks: templates[input.type](createContext(input, language)) }));
+  return languages.map((language) => {
+    // Names, addresses and other typed text in the script of this language (see localize.ts).
+    const localized: DraftInput = { ...input, data: localizeData(input.data, language), firmCity: convertText(input.firmCity, language, input.data.localized?.[language] ?? {}) ?? input.firmCity };
+    return { language, blocks: templates[input.type](createContext(localized, language)) };
+  });
 }
 
 export function buildDraft(input: DraftInput, choice: DraftChoice) {
