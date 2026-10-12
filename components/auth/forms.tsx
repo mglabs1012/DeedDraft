@@ -22,6 +22,7 @@ import {
   signUpSchema,
   updatePasswordSchema,
 } from "@/lib/schemas/auth";
+import { safeNextPath } from "@/lib/safe-path";
 import { onboardingSchema, type OnboardingInput } from "@/lib/schemas";
 
 const inputClass =
@@ -37,7 +38,7 @@ function PendingIcon({ pending }: { pending: boolean }) {
   return pending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowRight className="size-4" />;
 }
 
-export function SignInForm() {
+export function SignInForm({ next }: { next?: string }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string>();
@@ -52,7 +53,7 @@ export function SignInForm() {
       void signIn(values).then((result) => {
         if (result.error) return setMessage(result.error);
         toast.success("Welcome back.");
-        router.replace("/app/dashboard");
+        router.replace(safeNextPath(next));
         router.refresh();
       });
     });

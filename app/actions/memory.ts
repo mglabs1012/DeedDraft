@@ -4,12 +4,14 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, generateJson, isAiConfigured, usageDetails } from "@/lib/ai/claude";
+import { aiAllowance } from "@/lib/ai/guard.server";
 import { builtInReferences, loadFirmMemory } from "@/lib/ai/memory.server";
 import { stylePrompt } from "@/lib/ai/prompts";
 import { anonymiseDraft, readReferenceDraft } from "@/lib/ai/references.server";
 import { deedTypeIds, type DeedType } from "@/lib/deed-types";
 import { requireWorkspace } from "@/lib/workspace";
 import type { AiMemory } from "@/types/database";
+import { userMessage } from "@/lib/errors";
 
 type Result<T = object> = { error: string } | ({ error?: undefined } & T);
 
@@ -53,7 +55,7 @@ export async function getMemoryContent(input: unknown): Promise<Result<{ title: 
 
 async function insertMemory(workspace: Awaited<ReturnType<typeof requireWorkspace>>, row: Pick<AiMemory, "kind" | "content"> & Partial<Pick<AiMemory, "deed_type" | "language" | "title" | "source">>): Promise<string | null> {
   const { error } = await workspace.supabase.from("ai_memory").insert({ ...row, firm_id: workspace.firm.id, created_by: workspace.user.id });
-  if (error) return error.code === "42P01" || error.code === "PGRST205" ? MIGRATION_HINT : error.message;
+  if (error) return error.code === "42P01" || error.code === "PGRST205" ? MIGRATION_HINT : userMessage(error);
   revalidatePath("/app/settings/ai");
   return null;
 }
@@ -65,7 +67,7 @@ export async function saveNote(input: unknown): Promise<Result> {
   const workspace = await requireWorkspace();
   if (parsed.data.id) {
     const { error } = await workspace.supabase.from("ai_memory").update({ content: parsed.data.content, deed_type: parsed.data.deedType ?? null, updated_at: new Date().toISOString() }).eq("id", parsed.data.id).eq("firm_id", workspace.firm.id);
-    if (error) return { error: error.message };
+    if (error) return { error: userMessage(error) };
     revalidatePath("/app/settings/ai");
     return {};
   }
@@ -78,7 +80,7 @@ export async function setMemoryEnabled(input: unknown): Promise<Result> {
   if (!parsed.success) return { error: "Invalid request." };
   const workspace = await requireWorkspace();
   const { error } = await workspace.supabase.from("ai_memory").update({ enabled: parsed.data.enabled, updated_at: new Date().toISOString() }).eq("id", parsed.data.id).eq("firm_id", workspace.firm.id);
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
   revalidatePath("/app/settings/ai");
   return {};
 }
@@ -88,7 +90,7 @@ export async function deleteMemory(input: unknown): Promise<Result> {
   if (!parsed.success) return { error: "Invalid request." };
   const workspace = await requireWorkspace();
   const { error } = await workspace.supabase.from("ai_memory").delete().eq("id", parsed.data.id).eq("firm_id", workspace.firm.id);
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
   revalidatePath("/app/settings/ai");
   return {};
 }
@@ -102,6 +104,8 @@ export async function uploadReference(formData: FormData): Promise<Result<{ item
   if (!ACCEPTED.includes(file.type)) return { error: "Upload a PDF, Word (.docx), JPG or PNG file." };
   if (file.size > 20 * 1024 * 1024) return { error: "The file must be under 20 MB." };
   const workspace = await requireWorkspace();
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   try {
     const result = await readReferenceDraft({ bytes: new Uint8Array(await file.arrayBuffer()), mimeType: file.type, fileName: file.name });
     return await storeReference(workspace, { ...result, deedType: override.success ? override.data : result.deedType }, "upload");
@@ -116,6 +120,8 @@ export async function pasteReference(input: unknown): Promise<Result<{ item: Mem
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid text." };
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
   const workspace = await requireWorkspace();
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   try {
     const result = await readReferenceDraft({ text: parsed.data.text, fileName: "pasted text" });
     return await storeReference(workspace, { ...result, deedType: parsed.data.deedType ?? result.deedType }, "upload");
@@ -130,7 +136,7 @@ async function storeReference(workspace: Awaited<ReturnType<typeof requireWorksp
     .insert({ firm_id: workspace.firm.id, created_by: workspace.user.id, kind: "reference", deed_type: result.deedType, language: result.language, title: result.title, content: result.content, source })
     .select("*")
     .single();
-  if (error || !data) return { error: error?.code === "42P01" || error?.code === "PGRST205" ? MIGRATION_HINT : (error?.message ?? "Could not save the reference.") };
+  if (error || !data) return { error: error?.code === "42P01" || error?.code === "PGRST205" ? MIGRATION_HINT : (userMessage(error, "Could not save the reference.")) };
   await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, user_id: workspace.user.id, action: "ai_saved_reference", details: { ...usageDetails(result.usage), deed_type: result.deedType, language: result.language } });
   revalidatePath("/app/settings/ai");
   return { item: toItem(data as AiMemory) };
@@ -144,6 +150,8 @@ export async function saveDraftAsReference(input: unknown): Promise<Result> {
   const workspace = await requireWorkspace();
   const { data: deed } = await workspace.supabase.from("deeds").select("id, deed_type, title").eq("id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   try {
     const { content, usage } = await anonymiseDraft(parsed.data.text);
     const result = await storeReference(workspace, { deedType: deed.deed_type, language: parsed.data.language, title: "Accepted draft – " + new Date().toLocaleDateString("en-IN"), content, usage }, "finalized");
@@ -164,6 +172,8 @@ export async function learnStyle(input: unknown): Promise<Result<{ suggestions: 
   const builtIn = (await builtInReferences()).filter((ref) => ref.deedType === parsed.data.deedType).map((ref) => ref.content);
   const sources = (firm.length ? firm : builtIn).slice(0, 4).map((content) => content.slice(0, 20000));
   if (!sources.length) return { error: "Add at least one accepted draft of this type first." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   try {
     const { data, usage } = await generateJson<{ instructions?: unknown[] }>({
       system: stylePrompt(parsed.data.deedType),

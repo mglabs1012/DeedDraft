@@ -21,7 +21,7 @@ export default async function DeedDetailPage({ params, searchParams }: { params:
 
   const [deedResult, documentsResult, activityResult, draftsResult] = await Promise.all([
     workspace.supabase.from("deeds").select("*").eq("id", id).eq("firm_id", workspace.firm.id).maybeSingle(),
-    workspace.supabase.from("deed_documents").select("*").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }),
+    workspace.supabase.from("deed_documents").select("id, deed_id, firm_id, category, file_name, storage_path, mime_type, size_bytes, uploaded_by, created_at, text_source, text_quality, page_count, processed_at").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }),
     workspace.supabase.from("activity_log").select("*").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }).limit(30),
     // Tolerates a database without migration 0004: the studio then starts from the generated draft.
     workspace.supabase.from("deed_drafts").select("id, language, version, note, created_at, content").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("version", { ascending: false }).limit(20),

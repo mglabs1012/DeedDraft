@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 
 import { DeedsTable } from "@/components/deeds/deeds-table";
 import { getCurrentWorkspace } from "@/lib/workspace";
-import type { Deed } from "@/types/database";
+import { DEED_SUMMARY_COLUMNS, type DeedSummary } from "@/types/database";
 
 export default async function DeedsPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
   const params = await searchParams;
@@ -11,9 +11,10 @@ export default async function DeedsPage({ searchParams }: { searchParams: Promis
   if (!workspace) return null;
   const { data } = await workspace.supabase
     .from("deeds")
-    .select("*")
+    .select(DEED_SUMMARY_COLUMNS)
     .eq("firm_id", workspace.firm.id)
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .limit(2000);
 
   return (
     <div>
@@ -21,7 +22,7 @@ export default async function DeedsPage({ searchParams }: { searchParams: Promis
         <div><p className="text-sm font-semibold tracking-[0.16em] text-accent-foreground uppercase">Matter register</p><h1 className="mt-2 text-2xl font-semibold tracking-tight text-primary sm:text-3xl">Deeds</h1><p className="mt-2 text-sm text-muted-foreground">Search, filter, and keep every active matter organised.</p></div>
         <Link className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground" href="/app/deeds/new"><Plus className="size-4" /> New deed</Link>
       </div>
-      <section className="mt-6 rounded-xl border border-border bg-card p-3 shadow-sm sm:mt-7 sm:p-5"><DeedsTable deeds={(data ?? []) as Deed[]} initialQuery={params.q ?? ""} initialStatus={params.status} key={(params.q ?? "") + (params.status ?? "")} /></section>
+      <section className="mt-6 rounded-xl border border-border bg-card p-3 shadow-sm sm:mt-7 sm:p-5"><DeedsTable deeds={(data ?? []) as DeedSummary[]} initialQuery={params.q ?? ""} initialStatus={params.status} key={(params.q ?? "") + (params.status ?? "")} /></section>
     </div>
   );
 }

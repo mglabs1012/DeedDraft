@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { updateProfileSchema } from "@/lib/schemas/deed-data";
 import { updateFirmSchema } from "@/lib/schemas/settings";
 import { requireWorkspace } from "@/lib/workspace";
+import { userMessage } from "@/lib/errors";
 
 export async function updateFirm(input: unknown) {
   const parsed = updateFirmSchema.safeParse(input);
@@ -24,7 +25,7 @@ export async function updateFirm(input: unknown) {
     })
     .eq("id", workspace.firm.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -48,7 +49,7 @@ export async function updateProfile(input: unknown) {
     .update({ full_name: parsed.data.fullName, phone: parsed.data.phone || null })
     .eq("id", workspace.user.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   revalidatePath("/app", "layout");
   return {};

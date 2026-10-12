@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { deleteDeed, duplicateDeed } from "@/app/actions/deeds";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
 import { deedTypeLabels, statusLabels, type DeedStatus, type DeedType } from "@/lib/deeds";
-import type { Deed } from "@/types/database";
+import type { DeedSummary as Deed } from "@/types/database";
 
 type Props = { deeds: Deed[]; initialQuery?: string; initialStatus?: string };
 const selectClass = "h-9 rounded-lg border border-border bg-background px-2 text-sm outline-none focus:border-primary";

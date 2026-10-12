@@ -88,6 +88,9 @@ export type Database = {
 };
 
 export type Deed = Database["public"]["Tables"]["deeds"]["Row"];
+/** Columns needed by deed lists (no data / remarks). */
+export const DEED_SUMMARY_COLUMNS = "id, title, reference_no, deed_type, status, language, created_at, updated_at";
+export type DeedSummary = Pick<Deed, "id" | "title" | "reference_no" | "deed_type" | "status" | "language" | "created_at" | "updated_at">;
 export type Firm = Database["public"]["Tables"]["firms"]["Row"];
 export type FirmMember = Database["public"]["Tables"]["firm_members"]["Row"];
 export type AiMemory = Database["public"]["Tables"]["ai_memory"]["Row"];

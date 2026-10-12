@@ -8,6 +8,7 @@ import {
   recategorizeDocumentSchema,
 } from "@/lib/schemas/documents";
 import { requireWorkspace } from "@/lib/workspace";
+import { userMessage } from "@/lib/errors";
 
 type ActionResult = { error?: string; url?: string; id?: string };
 
@@ -54,7 +55,7 @@ export async function createDocumentRecord(input: unknown): Promise<ActionResult
     uploaded_by: workspace.user.id,
   }).select("id").single();
 
-  if (error || !created) return { error: error?.message ?? "Could not save the document." };
+  if (error || !created) return { error: userMessage(error, "Could not save the document.") };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -80,7 +81,7 @@ export async function recategorizeDocument(input: unknown): Promise<ActionResult
     .update({ category: parsed.data.category })
     .eq("id", document.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -105,7 +106,7 @@ export async function createDocumentSignedUrl(input: unknown): Promise<ActionRes
     .from("deed-documents")
     .createSignedUrl(document.storage_path, 60);
 
-  return error || !data ? { error: error?.message ?? "Could not create preview URL." } : { url: data.signedUrl };
+  return error || !data ? { error: userMessage(error, "Could not create preview URL.") } : { url: data.signedUrl };
 }
 
 export async function deleteDocument(input: unknown): Promise<ActionResult> {
@@ -118,13 +119,13 @@ export async function deleteDocument(input: unknown): Promise<ActionResult> {
   const { error: storageError } = await workspace.supabase.storage
     .from("deed-documents")
     .remove([document.storage_path]);
-  if (storageError) return { error: storageError.message };
+  if (storageError) return { error: userMessage(storageError) };
 
   const { error } = await workspace.supabase
     .from("deed_documents")
     .delete()
     .eq("id", document.id);
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,

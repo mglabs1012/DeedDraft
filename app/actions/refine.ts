@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, generateJson, isAiConfigured, usageDetails } from "@/lib/ai/claude";
+import { aiAllowance } from "@/lib/ai/guard.server";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { refinePrompt } from "@/lib/ai/prompts";
 import { createRedactor } from "@/lib/ai/redact";
@@ -53,6 +54,8 @@ export async function refineDraft(input: unknown): Promise<Result<{ version: AiD
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
   const { workspace, deed, data } = await loadDeed(parsed.data.deedId);
   if (!deed || !data) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   if (deed.deed_type === "other" && data.custom) return { error: "Use the Draft tab for documents made from the template library." };
   const { language } = parsed.data;
 

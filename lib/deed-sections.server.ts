@@ -3,6 +3,7 @@ import "server-only";
 import { parseDeedData } from "@/lib/schemas/deed-data";
 import type { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
+import { userMessage } from "@/lib/errors";
 
 type Workspace = Awaited<ReturnType<typeof requireWorkspace>>;
 
@@ -15,7 +16,7 @@ export async function saveDeedSection(workspace: Workspace, deedId: string, sect
   const { error } = await workspace.supabase.rpc("update_deed_section", { p_deed_id: deedId, p_section: section, p_value: value as Json });
   if (!error) return null;
   const fallback = error.code === "PGRST202" || error.code === "42883" || /unknown deed section/i.test(error.message);
-  if (!fallback) return error.message;
+  if (!fallback) return userMessage(error);
 
   const { data: deed, error: readError } = await workspace.supabase.from("deeds").select("data").eq("id", deedId).eq("firm_id", workspace.firm.id).maybeSingle();
   if (readError || !deed) return readError?.message ?? "Deed not found.";

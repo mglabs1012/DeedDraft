@@ -10,6 +10,7 @@ import { Field, inputClass, textareaClass } from "@/components/ui/field";
 import type { DeedLanguage } from "@/lib/deeds";
 import type { CustomDoc, CustomDraft } from "@/lib/schemas/deed-data";
 import type { LibraryEntry } from "@/lib/templates/catalog";
+import { countBlanks, htmlToText } from "@/lib/drafting/checks";
 import { formFor, type FormField } from "@/lib/templates/forms";
 import { customDraftHtml, draftToText, templateAsDraft, textToParagraphs } from "@/lib/templates/render";
 import { cn } from "@/lib/utils";
@@ -155,6 +156,7 @@ export function CustomDraftPanel({
     });
     return drafts.length ? customDraftHtml({ drafts, title, referenceNo, footer }) : "";
   }, [active, langs, custom.drafts, aiEnabled, blank, title, referenceNo, footer]);
+  const blanks = useMemo(() => (html ? countBlanks(htmlToText(html)) : 0), [html]);
 
   const create = (lang: Lang) => {
     setWorking(lang);
@@ -229,6 +231,12 @@ export function CustomDraftPanel({
         {html ? (
           <section className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5">
             <h2 className="mb-1 font-semibold text-primary">Download</h2>
+            {blanks ? (
+              <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                <span>{blanks} blank{blanks === 1 ? " is" : "s are"} still empty (shown as lines). Add the missing details in step 1, edit the text, or fill them by hand.</span>
+              </p>
+            ) : null}
             <Button className="h-10 w-full" onClick={downloadWord} type="button"><FileDown className="size-4" /> Word (.doc)</Button>
             <Button className="h-10 w-full" onClick={print} type="button" variant="outline"><Printer className="size-4" /> Print / save as PDF</Button>
             <p className="pt-1 text-xs leading-5 text-muted-foreground">This is a draft. Check names, numbers and dates, and take legal advice for important matters. Some documents need stamp paper and registration.</p>

@@ -1,16 +1,18 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import { createClient } from "@/lib/supabase/server";
 import type { Firm, FirmMember } from "@/types/database";
 
-export async function getCurrentUser() {
+/** Cached per request: the layout, page and actions share one auth check. */
+export const getCurrentUser = cache(async function getCurrentUser() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   return { supabase, user };
-}
+});
 
 export async function requireUser() {
   const { supabase, user } = await getCurrentUser();
@@ -22,7 +24,8 @@ export async function requireUser() {
   return { supabase, user };
 }
 
-export async function getCurrentWorkspace() {
+/** Cached per request: user, membership and firm are read once however many components ask. */
+export const getCurrentWorkspace = cache(async function getCurrentWorkspace() {
   const { supabase, user } = await requireUser();
   const { data: memberships, error: membershipError } = await supabase
     .from("firm_members")
@@ -56,7 +59,7 @@ export async function getCurrentWorkspace() {
     membership,
     firm: firm as Firm,
   };
-}
+});
 
 export async function requireWorkspace() {
   const workspace = await getCurrentWorkspace();

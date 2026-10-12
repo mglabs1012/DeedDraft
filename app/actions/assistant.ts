@@ -4,6 +4,7 @@ import type { Message } from "@aws-sdk/client-bedrock-runtime";
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, generateJson, isAiConfigured, usageDetails } from "@/lib/ai/claude";
+import { aiAllowance } from "@/lib/ai/guard.server";
 import { relevantFacts } from "@/lib/ai/facts";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { assistantPrompt } from "@/lib/ai/prompts";
@@ -42,6 +43,8 @@ export async function askAssistant(input: unknown): Promise<Result<{ messages: C
   const workspace = await requireWorkspace();
   const { data: deed } = await workspace.supabase.from("deeds").select("*").eq("id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   const data = parseDeedData(deed.data);
   const draftLanguage = deed.language === "english" ? "english" : "hindi";
   const redactor = createRedactor();

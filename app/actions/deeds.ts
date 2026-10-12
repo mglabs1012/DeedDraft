@@ -14,6 +14,7 @@ import { emptyDeedData, parseDeedData, updateDeedSectionSchema } from "@/lib/sch
 import { getLibraryEntry } from "@/lib/templates/library.server";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
+import { userMessage } from "@/lib/errors";
 
 type ActionResult = { error?: string; id?: string };
 
@@ -52,7 +53,7 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
     .select("id, reference_no")
     .single();
 
-  if (error || !data) return { error: error?.message ?? "Could not create the deed." };
+  if (error || !data) return { error: userMessage(error, "Could not create the deed.") };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -79,7 +80,7 @@ export async function updateDeedTitle(input: unknown): Promise<ActionResult> {
     .update({ title: parsed.data.title })
     .eq("id", deed.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -106,7 +107,7 @@ export async function updateDeedStatus(input: unknown): Promise<ActionResult> {
     .update({ status: parsed.data.status })
     .eq("id", deed.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -134,7 +135,7 @@ export async function updateRemarks(input: unknown): Promise<ActionResult> {
     .update({ remarks: parsed.data.remarks || null })
     .eq("id", deed.id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -162,14 +163,14 @@ export async function duplicateDeed(input: unknown): Promise<ActionResult> {
       deed_type: deed.deed_type,
       title: "Copy of " + deed.title,
       language: deed.language,
-      data: deed.data,
+      data: { ...parseDeedData(deed.data), chat: [] } as unknown as Json,
       remarks: deed.remarks,
       created_by: workspace.user.id,
     })
     .select("id, reference_no")
     .single();
 
-  if (error || !data) return { error: error?.message ?? "Could not duplicate the deed." };
+  if (error || !data) return { error: userMessage(error, "Could not duplicate the deed.") };
 
   await workspace.supabase.from("activity_log").insert({
     firm_id: workspace.firm.id,
@@ -202,7 +203,7 @@ export async function deleteDeed(input: unknown): Promise<ActionResult> {
     const { error: storageError } = await workspace.supabase.storage
       .from("deed-documents")
       .remove(documents.map((document) => document.storage_path));
-    if (storageError) return { error: storageError.message };
+    if (storageError) return { error: userMessage(storageError) };
   }
 
   await workspace.supabase.from("activity_log").insert({
@@ -214,7 +215,7 @@ export async function deleteDeed(input: unknown): Promise<ActionResult> {
   });
 
   const { error } = await workspace.supabase.from("deeds").delete().eq("id", deed.id);
-  if (error) return { error: error.message };
+  if (error) return { error: userMessage(error) };
 
   revalidatePath("/app/deeds");
   revalidatePath("/app/dashboard");
@@ -242,13 +243,13 @@ export async function updateDeedSection(input: unknown): Promise<ActionResult> {
 
   if (rpcError) {
     const missingFunction = rpcError.code === "PGRST202" || rpcError.code === "42883";
-    if (!missingFunction) return { error: rpcError.message };
+    if (!missingFunction) return { error: userMessage(rpcError) };
     const data = { ...parseDeedData(deed.data), [parsed.data.section]: parsed.data.value };
     const { error } = await workspace.supabase
       .from("deeds")
       .update({ data: data as unknown as Json })
       .eq("id", deed.id);
-    if (error) return { error: error.message };
+    if (error) return { error: userMessage(error) };
   }
 
   await workspace.supabase.from("activity_log").insert({

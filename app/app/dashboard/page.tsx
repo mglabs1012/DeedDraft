@@ -6,7 +6,7 @@ import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
 import { DeedIcon } from "@/components/deeds/deed-icon";
 import { deedTypeOrder, deedTypes } from "@/lib/deed-types";
 import { getCurrentWorkspace } from "@/lib/workspace";
-import type { Deed } from "@/types/database";
+import { DEED_SUMMARY_COLUMNS, type DeedSummary } from "@/types/database";
 
 
 export default async function DashboardPage() {
@@ -25,7 +25,7 @@ export default async function DashboardPage() {
       workspace.supabase.from("deeds").select("id", { count: "exact", head: true }).eq("firm_id", workspace.firm.id).eq("status", "under_review"),
       workspace.supabase.from("deeds").select("id", { count: "exact", head: true }).eq("firm_id", workspace.firm.id).eq("status", "generated").gte("created_at", monthStart.toISOString()),
       workspace.supabase.from("deeds").select("id", { count: "exact", head: true }).eq("firm_id", workspace.firm.id).gte("created_at", monthStart.toISOString()),
-      workspace.supabase.from("deeds").select("*").eq("firm_id", workspace.firm.id).order("updated_at", { ascending: false }).limit(8),
+      workspace.supabase.from("deeds").select(DEED_SUMMARY_COLUMNS).eq("firm_id", workspace.firm.id).order("updated_at", { ascending: false }).limit(8),
     ]);
 
   const name = profileResult.data?.full_name?.split(" ")[0] ?? "there";
@@ -35,7 +35,7 @@ export default async function DashboardPage() {
     { label: "Under review", value: reviewResult.count ?? 0, icon: Landmark, tone: "bg-amber-50 text-amber-700", href: "/app/deeds?status=under_review" },
     { label: "Generated this month", value: generatedResult.count ?? 0, icon: ScrollText, tone: "bg-emerald-50 text-emerald-700", href: "/app/deeds?status=generated" },
   ];
-  const recent = (recentResult.data ?? []) as Deed[];
+  const recent = (recentResult.data ?? []) as DeedSummary[];
 
   return (
     <div className="space-y-7">

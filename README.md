@@ -26,6 +26,7 @@ Create a new Supabase project, then run the SQL files in order in the Supabase S
 4. `supabase/migrations/202609290004_ocr_drafts_chat.sql` — caches the text read from each document (OCR), allows Word/WebP uploads, and adds saved draft versions (`deed_drafts`) and the AI chat history (`deed_ai_messages`)
 
 5. `supabase/migrations/202610100005_ai_memory.sql` — adds the `ai_memory` table (firm drafting instructions and accepted reference drafts) and allows the AI sections in `update_deed_section`
+6. `supabase/migrations/202610120006_performance_indexes.sql` — indexes for the activity feed, the daily AI limit, deed filters and the per-request membership lookup (safe to re-run)
 
 Existing projects only need to run the migrations they have not applied yet. Until migration 3 is applied the app falls back to a non-atomic save; until migration 4 is applied, document text is not cached and edited drafts cannot be saved; until migration 5 is applied, AI memory stays off (the built-in reference drafts still work).
 
@@ -214,4 +215,15 @@ Open **Settings → AI connection → Test AI connection**. It shows the AWS reg
 - The application creates time-limited signed URLs for document previews and downloads.
 - The Supabase service-role/secret key is isolated in `lib/supabase/admin.ts`, a server-only module.
 - Section saves go through `update_deed_section` (SECURITY INVOKER, so RLS still applies), updating one JSON section atomically so colleagues editing different sections never overwrite each other.
-- Security headers (nosniff, frame denial, referrer policy, permissions policy, HSTS) are set in `next.config.ts`.
+- Security headers are set in `next.config.ts`: a Content-Security-Policy that allows scripts, frames and connections only from the site and its Supabase project, plus nosniff, frame denial, referrer policy, permissions policy, COOP and HSTS. Signed-in pages are sent with `Cache-Control: private, no-store` and `noindex`; `robots.txt` keeps crawlers out of the workspace.
+- Database and storage errors are shown to users as plain messages (`lib/errors.ts`); codes and table names are only logged on the server.
+- After sign-in, users return to the page they opened, but only same-site `/app` paths are followed (no open redirects).
+
+## Running in production
+
+- **Health check:** `GET /api/health` returns `{"status":"ok","database":"ok","ai":"configured"}` (HTTP 200), or HTTP 503 when the database is unreachable. Point your uptime monitor at it. It reveals no secrets or user data.
+- **Logs:** every uncaught server error is logged as one JSON line (`instrumentation.ts`) with a `digest`; the same reference appears on the user's error page, so a screenshot is enough to find the log entry. Missing or half-filled environment variables are reported at start-up.
+- **AI limits:** each user may make `AI_LIMIT_PER_MINUTE` AI requests a minute (default 20) and each firm `AI_LIMIT_PER_DAY` in 24 hours (default 500), so a stuck button or a shared login cannot run up the Bedrock bill. Set either to `0` to switch it off. The daily count uses the activity log, so it holds across server instances; run migration 6 for its index.
+- **Final check:** the Generate tab runs instant, rule-based checks before printing — minors signing, duplicate Aadhaar/PAN, PAN above ₹10 lakh (Rule 114B), 1% TDS at ₹50 lakh (s. 194-IA), Will attestation by two witnesses (s. 63), leases over a year needing registration (s. 17), the four-month presentation limit (s. 23), overpayment, missing areas and blanks left in the draft. Problems marked red block "Mark as generated".
+- **Performance:** deed lists load only summary columns, the deed page never sends stored OCR text to the browser, and the signed-in user, membership and firm are read once per request.
+- **Upgrading Next.js:** keep `next` and `eslint-config-next` on the same version and run `npm run build` before deploying.

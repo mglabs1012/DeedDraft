@@ -3,6 +3,7 @@
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, MAX_DOCUMENTS_PER_REQUEST, aiModel, fileBlocks, generate, generateJson, isAiConfigured, usageDetails, type AiUsage, type ContentPart } from "@/lib/ai/claude";
+import { aiAllowance } from "@/lib/ai/guard.server";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { identityWarnings, normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, type Extraction, type ReviewIssue } from "@/lib/ai/parse";
 import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "@/lib/ai/prompts";
@@ -100,7 +101,7 @@ async function remember(workspace: Workspace, deedId: string, role: "user" | "as
  * (with Kruti Dev conversion) or Word text for free, AI OCR on Bedrock only for
  * scans and garbled pages.
  */
-async function documentText(workspace: Workspace, deedId: string, documentId: string, force: boolean): Promise<DocumentText> {
+async function documentText(workspace: Workspace, deedId: string, documentId: string, force: boolean, checkAllowance = false): Promise<DocumentText> {
   const { data: document } = await workspace.supabase.from("deed_documents").select("*").eq("id", documentId).eq("deed_id", deedId).eq("firm_id", workspace.firm.id).maybeSingle();
   if (!document) throw new AiError("Document not found.");
   if (!force && document.extracted_text && document.text_source) {
@@ -111,7 +112,15 @@ async function documentText(workspace: Workspace, deedId: string, documentId: st
   const { data: blob, error } = await workspace.supabase.storage.from("deed-documents").download(document.storage_path);
   if (error || !blob) throw new AiError("Could not read the document from storage.");
 
-  const result: ReadResult = await readDocument({ bytes: new Uint8Array(await blob.arrayBuffer()), mime: document.mime_type, fileName: document.file_name, allowAi: isAiConfigured() });
+  // Text layers and Word files are read for free; AI OCR (scans) counts against the AI limit when called on its own.
+  const blocked = checkAllowance && isAiConfigured() ? await aiAllowance(workspace) : null;
+  let result: ReadResult;
+  try {
+    result = await readDocument({ bytes: new Uint8Array(await blob.arrayBuffer()), mime: document.mime_type, fileName: document.file_name, allowAi: isAiConfigured() && !blocked });
+  } catch (error) {
+    if (blocked) throw new AiError(blocked);
+    throw error;
+  }
   if (result.usage) await logUsage(workspace, deedId, "ai_read_document", result.usage, { file_name: document.file_name, pages: result.pages ?? null });
 
   // Cache the text (ignored if migration 202609290004 has not been applied yet).
@@ -131,7 +140,7 @@ export async function readDocumentText(input: unknown): Promise<Result<DocumentT
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
   try {
-    return await documentText(workspace, deed.id, parsed.data.documentId, parsed.data.force ?? false);
+    return await documentText(workspace, deed.id, parsed.data.documentId, parsed.data.force ?? false, true);
   } catch (error) {
     return failure(error);
   }
@@ -143,6 +152,8 @@ export async function extractFromDocument(input: unknown): Promise<Result<{ extr
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
 
   try {
     const read = await documentText(workspace, deed.id, parsed.data.documentId, parsed.data.force ?? false);
@@ -183,6 +194,8 @@ export async function draftClauses(input: unknown): Promise<Result<{ clauses: st
 
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
 
   try {
     const memory = await draftingContext(workspace, deed.deed_type, parsed.data.language);
@@ -213,6 +226,8 @@ export async function reviewDeed(input: unknown): Promise<Result<{ issues: Revie
 
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
 
   const data = parseDeedData(deed.data);
   const { count: documentCount } = await workspace.supabase.from("deed_documents").select("id", { count: "exact", head: true }).eq("deed_id", deed.id);
@@ -271,6 +286,8 @@ export async function autofillFromDocuments(input: unknown): Promise<Result<{ re
 
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
 
   const { data: documents } = await workspace.supabase
     .from("deed_documents")
@@ -356,6 +373,8 @@ export async function chatEditDraft(input: unknown): Promise<Result<{ reply: str
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   const { draft, message, history } = parsed.data;
 
   try {
@@ -389,6 +408,8 @@ export async function reviewDraftText(input: unknown): Promise<Result<{ issues: 
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
   const { workspace, deed } = await loadDeed(parsed.data.deedId);
   if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
   try {
     const memory = await draftingContext(workspace, deed.deed_type, parsed.data.draft.language, { references: false });
     const { data: raw, usage } = await generateJson({

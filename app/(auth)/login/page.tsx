@@ -1,6 +1,7 @@
 import { SignInForm } from "@/components/auth/forms";
 
-export default function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
+  const { next } = await searchParams;
   return (
     <div>
       <p className="text-sm font-semibold tracking-[0.16em] text-accent-foreground uppercase">Welcome back</p>
@@ -8,7 +9,7 @@ export default function LoginPage() {
       <p className="mt-3 text-sm leading-6 text-muted-foreground">
         Use your firm email to continue your deed work.
       </p>
-      <div className="mt-8"><SignInForm /></div>
+      <div className="mt-8"><SignInForm next={typeof next === "string" ? next : undefined} /></div>
     </div>
   );
 }

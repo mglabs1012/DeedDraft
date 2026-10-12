@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, generateJson, isAiConfigured, usageDetails } from "@/lib/ai/claude";
+import { aiAllowance } from "@/lib/ai/guard.server";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { saveDeedSection } from "@/lib/deed-sections.server";
 import { templateDraftPrompt } from "@/lib/ai/prompts";
@@ -78,6 +79,8 @@ export async function draftFromTemplate(input: unknown): Promise<Result<{ draft:
   const entry = getLibraryEntry(custom.templateId);
   const text = entry ? await getTemplateText(entry.id) : null;
   if (!entry || !text) return { error: "This template is no longer available." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
 
   try {
     const memory = await draftingContext(workspace, "other", parsed.data.language, { references: false });

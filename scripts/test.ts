@@ -30,6 +30,11 @@ import { convertText, localizeData, needsConversion, pendingConversions } from "
 import { applyEdits, blockSegments, hashSegments, keepsParticulars } from "../lib/drafting/segments";
 import { isValidAadhaar, verhoeffDigit } from "../lib/text/aadhaar";
 
+import { takeSlot } from "../lib/ai/rate-window";
+import { countBlanks, finalChecks, htmlToText } from "../lib/drafting/checks";
+import { userMessage } from "../lib/errors";
+import { safeNextPath } from "../lib/safe-path";
+
 const libraryIndex = libraryIndexJson as LibraryEntry[];
 
 let passed = 0;
@@ -449,6 +454,66 @@ test("Clause library covers every deed type in both languages", () => {
     assert.ok(clauses.length > 0, type);
     assert.equal(new Set(clauses.map((clause) => clause.id)).size, clauses.length, type + " unique ids");
     for (const clause of clauses) assert.ok(clause.hindi.startsWith("यह कि") && clause.english.startsWith("That"), clause.id);
+  }
+});
+
+test("Final check: minors, PAN, TDS, Will witnesses, payments and dates", () => {
+  const today = new Date("2026-10-12T10:00:00");
+  const adult = (id: string, role: Party["role"], extra: Partial<Party> = {}) => ({ id, role, fullName: "Person " + id, relation: "S/o", relativeName: "R " + id, age: 40, ...extra });
+  const base = { parties: [adult("s", "first", { pan: "ABCDE1234F" }), adult("b", "second", { pan: "BCDEA2345G" }), adult("w1", "witness"), adult("w2", "witness")], properties: [{ id: "p", kind: "plot", description: "plot", areaUnit: "sq_yd", area: 100 }], consideration: { total: 450000 }, payments: [{ id: "x", mode: "cash", amount: 450000 }], execution: { date: "2026-10-10" } };
+  assert.deepEqual(finalChecks("sale", parseDeedData(base), "", today), [], "a clean sale has no findings");
+
+  const ids = (type: Parameters<typeof finalChecks>[0], patch: object, text = "") => finalChecks(type, parseDeedData({ ...base, ...patch }), text, today).map((check) => check.severity + ":" + check.id);
+  const has = (list: string[], prefix: string) => list.some((item) => item.startsWith(prefix));
+  assert.ok(has(ids("sale", { parties: [adult("s", "first", { age: 16 }), ...base.parties.slice(1)] }), "error:minor-first"));
+  assert.ok(has(ids("sale", { consideration: { total: 1500000 }, payments: [{ id: "x", mode: "cash", amount: 1500000 }], parties: [adult("s", "first"), ...base.parties.slice(1)] }), "warning:pan-required"));
+  assert.ok(has(ids("sale", { consideration: { total: 6000000 }, payments: [{ id: "x", mode: "rtgs_neft", amount: 6000000 }] }), "warning:tds"));
+  assert.ok(!has(ids("sale", { consideration: { total: 6000000 }, payments: [{ id: "x", mode: "rtgs_neft", amount: 5940000 }, { id: "t", mode: "tds_challan", amount: 60000 }] }), "warning:tds"));
+  assert.ok(has(ids("will", { parties: [adult("t", "first"), adult("b", "second"), adult("w1", "witness")] }), "error:will-witnesses"));
+  assert.ok(has(ids("sale", { payments: [{ id: "x", mode: "cash", amount: 500000 }] }), "error:overpaid"));
+  assert.ok(has(ids("sale", { execution: { date: "2026-03-01" } }), "warning:date-old"));
+  assert.ok(has(ids("rent", { terms: { termMonths: 24 } }), "warning:rent-registration"));
+  assert.ok(!has(ids("rent", { terms: { termMonths: 12 } }), "warning:rent-registration"), "exactly one year does not need registration");
+  assert.ok(has(ids("sale", { parties: [adult("s", "first", { aadhaar: "536346756192" }), adult("b", "second", { aadhaar: "536346756192" }), ...base.parties.slice(2)] }), "error:dup"));
+  assert.ok(has(ids("sale", {}, "यह विक्रय पत्र दिनांक ............ को"), "warning:blanks"));
+  assert.ok(has(ids("sale", {}, "amount NaN"), "error:broken-text"));
+  const sorted = finalChecks("will", parseDeedData({ ...base, parties: [adult("t", "first", { age: 15 })] }), "", today);
+  assert.equal(sorted[0].severity, "error", "errors are listed first");
+});
+
+test("Blank detection and draft text extraction", () => {
+  assert.equal(countBlanks("दिनांक ............ को ____ और [विक्रेता का नाम]"), 3);
+  assert.equal(countBlanks("Rs. 4,50,000/- dated 5.10.2026"), 0);
+  assert.equal(htmlToText("<style>p{}</style><p>A &amp; B</p><p>C&nbsp;D</p>"), "A & B C D");
+  for (const type of deedTypeOrder) {
+    for (const language of deedTypes[type].languages) {
+      const text = htmlToText(buildDraft({ type, title: "T", referenceNo: "DD-1", data: sample, firmName: "Firm", firmCity: "Ajmer" }, language).html);
+      assert.ok(!/(undefined|NaN|null)/.test(text), type + " " + language + " renders a broken value");
+    }
+  }
+});
+
+test("Production safety: rate window, safe redirects, friendly database errors", () => {
+  const store = new Map<string, number[]>();
+  for (let i = 0; i < 3; i += 1) assert.ok(takeSlot(store, "u", 3, 1000 + i));
+  assert.ok(!takeSlot(store, "u", 3, 1500), "fourth call inside the minute is refused");
+  assert.ok(takeSlot(store, "u", 3, 62_000), "allowed again after the window");
+  assert.ok(takeSlot(store, "other", 3, 1500), "limits are per user");
+  assert.ok(takeSlot(store, "u", 0, 1500), "0 disables the limit");
+
+  assert.equal(safeNextPath("/app/deeds/123?tab=documents"), "/app/deeds/123?tab=documents");
+  for (const bad of ["//evil.com", "https://evil.com", "/app//evil.com", "/login", "/\\evil.com", "", null, undefined]) assert.equal(safeNextPath(bad), "/app/dashboard", String(bad));
+
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(userMessage({ code: "23505", message: "duplicate key value violates unique constraint \"deeds_firm_id_reference_no_key\"" }), "This already exists. Refresh the page and try again.");
+    assert.ok(userMessage({ code: "42P01", message: "relation \"public.ai_memory\" does not exist" }).includes("database update"));
+    assert.equal(userMessage({ statusCode: "413", message: "Payload too large" }), "The file is too large.");
+    assert.equal(userMessage({ code: "XX000", message: "internal: table secret_x" }, "Could not save."), "Could not save.", "unknown errors never leak details");
+    assert.equal(userMessage(null, "Fallback"), "Fallback");
+  } finally {
+    console.error = quiet;
   }
 });
 

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, aiModel, generateJson, isAiConfigured, usageDetails } from "@/lib/ai/claude";
+import { aiAllowance } from "@/lib/ai/guard.server";
 import { conversionPrompt } from "@/lib/ai/prompts";
 import { saveDeedSection } from "@/lib/deed-sections.server";
 import { pendingConversions } from "@/lib/drafting/localize";
@@ -43,6 +44,8 @@ export async function convertForDraft(input: unknown): Promise<Result<{ localize
   const pending = pendingConversions(data, language, [workspace.firm.city]);
   if (!pending.length) return { localized: data.localized, converted: 0 };
   if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
 
   try {
     const wanted = new Set(pending);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Braces, BookmarkPlus, CheckCircle2, Circle, Eye, FileDown, Languages, LoaderCircle, PenLine, Printer, RotateCcw, Sparkles, Stamp, Wand2 } from "lucide-react";
+import { Braces, BookmarkPlus, CheckCircle2, Circle, Eye, FileDown, Languages, LoaderCircle, PenLine, Printer, RotateCcw, ShieldCheck, Sparkles, Stamp, TriangleAlert, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { SavedDraft } from "@/app/actions/drafts";
@@ -15,6 +15,7 @@ import { getDeedType, type DeedType, type DraftLanguage, type SectionId } from "
 import type { DeedLanguage, DeedStatus } from "@/lib/deeds";
 import { buildDraftDocuments, defaultDraftChoice, draftChoices, type DraftChoice, type DraftDocument, type ReadinessItem } from "@/lib/drafting";
 import { renderDraftHtml } from "@/lib/drafting/blocks";
+import { finalChecks, htmlToText } from "@/lib/drafting/checks";
 import { editableDraftSchema, fromEditable, toEditable, type EditableDraft } from "@/lib/drafting/editable";
 import { pendingConversions, usedConversions } from "@/lib/drafting/localize";
 import { applyEdits, blockSegments, hashSegments } from "@/lib/drafting/segments";
@@ -107,6 +108,8 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
     [type, title, referenceNo, data, firmName, city],
   );
   const html = useMemo(() => renderDraftHtml({ title: referenceNo + " · " + title, documents: shown, footer: "Ref. " + referenceNo + " · Drafted by " + firmName + ", " + city }), [shown, referenceNo, title, firmName, city]);
+  const checks = useMemo(() => finalChecks(type, data, htmlToText(html)), [type, data, html]);
+  const blocking = checks.filter((check) => check.severity === "error");
 
   // Automatic Hindi ⇄ English conversion of typed names and addresses for the chosen draft language.
   const pendingByLang = useMemo(() => Object.fromEntries(languages.map((lang) => [lang, pendingConversions(data, lang, [city])])) as Record<DraftLanguage, string[]>, [languages, data, city]);
@@ -225,6 +228,27 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
           </ul>
         </section>
 
+        <section className={cn("rounded-xl border p-4 shadow-sm sm:p-5", blocking.length ? "border-destructive/40 bg-destructive/5" : checks.length ? "border-amber-300 bg-amber-50/60" : "border-emerald-300 bg-emerald-50/60")}>
+          <h2 className="flex items-center gap-2 font-semibold text-primary">
+            {checks.length ? <TriangleAlert className={cn("size-4", blocking.length ? "text-destructive" : "text-amber-700")} /> : <ShieldCheck className="size-4 text-emerald-700" />} Final check
+          </h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {blocking.length ? blocking.length + " problem" + (blocking.length === 1 ? "" : "s") + " must be fixed before signing." : checks.length ? "Please review " + checks.length + " point" + (checks.length === 1 ? "" : "s") + " before printing." : "No legal or data problems found."}
+          </p>
+          {checks.length ? (
+            <ul className="mt-3 space-y-1">
+              {checks.map((check) => (
+                <li key={check.id}>
+                  <button className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-card" onClick={() => onJump(check.tab)} type="button">
+                    <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", check.severity === "error" ? "bg-destructive" : "bg-amber-500")} />
+                    <span className="text-foreground">{check.message}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
         {aiEnabled && deedId ? (
           <section className="space-y-3 rounded-xl border border-accent/40 bg-accent/5 p-4 shadow-sm sm:p-5">
             <h2 className="flex items-center gap-2 font-semibold text-primary"><Wand2 className="size-4 text-accent-foreground" /> AI drafting</h2>
@@ -277,7 +301,7 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
           <Button className="h-10 w-full" onClick={downloadWord} type="button"><FileDown className="size-4" /> Download Word (.doc)</Button>
           <Button className="h-10 w-full" onClick={print} type="button" variant="outline"><Printer className="size-4" /> Print / save as PDF</Button>
           {status !== "generated" && status !== "finalized" ? (
-            <Button className="h-10 w-full" disabled={pending || missing.length > 0} onClick={onMarkGenerated} type="button" variant="secondary"><Stamp className="size-4" /> Mark as generated</Button>
+            <Button className="h-10 w-full" disabled={pending || missing.length > 0 || blocking.length > 0} onClick={onMarkGenerated} type="button" variant="secondary"><Stamp className="size-4" /> Mark as generated</Button>
           ) : null}
           {aiEnabled && deedId && languages.length === 1 ? (
             <Button className="h-10 w-full" disabled={busy} onClick={saveAsReference} title="Accepted for registration? Keep it so future drafts follow it." type="button" variant="ghost"><BookmarkPlus className="size-4" /> Save to AI memory</Button>
