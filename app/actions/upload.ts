@@ -9,6 +9,7 @@ import { unpackArchive } from "@/lib/uploads/archives";
 import { normalizeUpload } from "@/lib/uploads/normalize";
 import { extensionOf, MAX_UPLOAD_BYTES } from "@/lib/uploads/policy";
 import { mimeForUpload, storageOrigin } from "@/lib/uploads/mime";
+import { uploadPaths } from "@/lib/uploads/paths";
 import { assignDocumentRoles } from "./standard";
 import type { Database } from "@/types/database";
 
@@ -28,8 +29,8 @@ async function context(input: unknown) {
   const workspace = await requireWorkspace();
   const { data: deed } = await workspace.supabase.from("deeds").select("id").eq("id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
   if (!deed) throw new Error("Deed not found or your session has expired.");
-  const prefix = workspace.firm.id + "/" + deed.id + "/" + parsed.data.uploadId;
-  return { workspace, input: parsed.data, mime, prefix, path: prefix + "/source." + extensionOf(parsed.data.fileName) };
+  const paths = uploadPaths(workspace.firm.id, deed.id, parsed.data.uploadId, extensionOf(parsed.data.fileName));
+  return { workspace, input: parsed.data, mime, ...paths };
 }
 
 /** Small authorization request only. File bytes travel directly to private Storage. */
@@ -39,7 +40,15 @@ export async function prepareStandardUpload(input: unknown) {
     const { data: stored } = await ctx.workspace.supabase.storage.from("deed-documents").info(ctx.path);
     if (stored?.size === ctx.input.size) return { uploaded: true, path: ctx.path };
     const { data, error } = await ctx.workspace.supabase.storage.from("deed-documents").createSignedUploadUrl(ctx.path);
-    if (error || !data) return { error: "Could not authorize storage upload. Sign in again and check the private storage bucket policies." };
+    if (error || !data) {
+      // Log only classification, never signed URLs, tokens or user filenames.
+      const status = error && "statusCode" in error ? String(error.statusCode) : "unknown";
+      console.error("[upload:authorize]", { status, name: error?.name });
+      return { error: status === "401"
+        ? "Your session expired. Sign in again, then retry."
+        : "Storage could not authorize this upload. Retry; if it persists, the workspace administrator must check storage permissions.",
+        retryable: ["429", "500", "502", "503", "504"].includes(status) };
+    }
     return { token: data.token, path: ctx.path, mime: ctx.mime, endpoint: storageOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL!) + "/storage/v1/upload/resumable" };
   } catch (error) { return { error: error instanceof Error ? error.message : "Could not prepare upload." }; }
 }
@@ -82,7 +91,7 @@ export async function finishStandardUpload(input: unknown): Promise<{ error?: st
         if (normalized.bytes.length > MAX_UPLOAD_BYTES) throw new Error("Converted document exceeds 20 MB.");
         const name = normalized.name.slice(-250);
         const original = bundle.files.length === 1 && ext !== "zip" && ext !== "rar" && normalized.bytes === bytes;
-        const path = original ? ctx.path : ctx.prefix + "/" + index + "." + extensionOf(name);
+        const path = original ? ctx.path : ctx.prefix + index + "." + extensionOf(name);
         if (!original) {
           const { error } = await storage.upload(path, normalized.bytes, { contentType: normalized.mime, upsert: true });
           if (error) throw new Error("Converted file could not be stored. Retry processing.");

@@ -7,6 +7,7 @@ import { emptyDeedData, parseDeedData, partySchema, standardWorkspaceSchema } fr
 import { unpackArchive } from "../lib/uploads/archives";
 import { normalizeUpload } from "../lib/uploads/normalize";
 import { checkEntry, MAX_EXPANDED_BYTES, MAX_UPLOAD_BYTES, safeArchiveName } from "../lib/uploads/policy";
+import { uploadPaths } from "../lib/uploads/paths";
 
 function crc32(bytes: Buffer) {
   let crc = 0xffffffff;
@@ -62,6 +63,18 @@ async function main() {
   async function test(name: string, run: () => unknown | Promise<unknown>) {
     await run(); checks++; console.log("  ✓ " + name);
   }
+  await test("Resumable source and converted files match deployed three-part Storage RLS", () => {
+    const firm = "11111111-1111-4111-8111-111111111111";
+    const deed = "22222222-2222-4222-8222-222222222222";
+    const upload = "33333333-3333-4333-8333-333333333333";
+    const paths = uploadPaths(firm, deed, upload, "pdf");
+    for (const path of [paths.path, paths.prefix + "0.pdf", paths.prefix + "29.jpg"]) {
+      assert.equal(path.split("/").length, 3);
+      assert.deepEqual(path.split("/").slice(0, 2), [firm, deed]);
+      assert.ok(path.split("/")[2].startsWith(upload + "-"));
+    }
+    assert.equal(uploadPaths(firm, deed, upload, "pdf").path, paths.path);
+  });
   await test("Optional modules are hidden for new AND legacy deeds; settings round-trip", () => {
     assert.deepEqual(emptyDeedData().workspace.modules, { naksha: false, consideration: false });
     assert.deepEqual(parseDeedData({}).workspace.modules, { naksha: false, consideration: false });

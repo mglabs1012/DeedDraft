@@ -13,5 +13,8 @@ export async function POST(request: Request) {
   try { body = JSON.parse(text); } catch { return Response.json({ error: "Invalid request." }, { status: 400 }); }
   if (body.operation !== "prepare" && body.operation !== "finish") return Response.json({ error: "Invalid operation." }, { status: 400 });
   const result = body.operation === "prepare" ? await prepareStandardUpload(body.input) : await finishStandardUpload(body.input);
-  return Response.json(result, { headers: { "Cache-Control": "private, no-store" } });
+  return Response.json(result, {
+    status: "retryable" in result && result.retryable ? 503 : 200,
+    headers: { "Cache-Control": "private, no-store" },
+  });
 }

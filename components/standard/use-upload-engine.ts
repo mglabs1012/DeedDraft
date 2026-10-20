@@ -110,6 +110,7 @@ export function useUploadEngine(deedId: string, onUploaded: (documents: Workspac
       update(job.id, { state: "processing", error: undefined });
       // Bytes already live in storage; a processing retry never resends them.
       const result = await uploadRequest<Awaited<ReturnType<typeof finishStandardUpload>>>("finish", request);
+      if (!alive.current) return;
       if (result.documents.length) callback.current(result.documents, result.notices, job.role);
       if (result.error) throw new Error(result.error + (result.notices.length ? " " + result.notices.join(" · ") : ""));
       update(job.id, { state: "complete", error: undefined });

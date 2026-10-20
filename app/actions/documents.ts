@@ -118,8 +118,27 @@ export async function deleteDocument(input: unknown): Promise<ActionResult> {
 
   const paths = [document.storage_path];
   const parts = document.storage_path.split("/");
-  // New resumable uploads use a private, per-upload folder. Remove its retained
-  // source archive/image only when the last document from that upload is deleted.
+  // Flat upload filenames preserve the deployed three-segment Storage RLS.
+  // Delete retained sources only after the last registered sibling is removed.
+  const uploadPrefix = parts.length === 3
+    ? parts[2].match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-)(?:source|\d+)\./i)?.[1]
+    : undefined;
+  if (uploadPrefix) {
+    const folder = parts.slice(0, 2).join("/");
+    const { data: siblings, error: readError } = await workspace.supabase.from("deed_documents")
+      .select("id").eq("firm_id", workspace.firm.id).eq("deed_id", document.deed_id)
+      .like("storage_path", folder + "/" + uploadPrefix + "%").neq("id", document.id).limit(1);
+    if (readError) return { error: "Could not check related documents. Please retry." };
+    if (!siblings?.length) {
+      const { data: objects, error: listError } = await workspace.supabase.storage.from("deed-documents")
+        .list(folder, { search: uploadPrefix, limit: 100 });
+      if (listError) return { error: "Could not check the source files. Please retry." };
+      for (const object of objects ?? []) {
+        if (object.id && object.name.startsWith(uploadPrefix) && !object.name.includes("/")) paths.push(folder + "/" + object.name);
+      }
+    }
+  }
+  // Compatibility with any nested uploads made before the flat-path fix.
   if (parts.length === 4 && /^[0-9a-f-]{36}$/i.test(parts[2])) {
     const prefix = parts.slice(0, 3).join("/");
     const { data: siblings, error: readError } = await workspace.supabase.from("deed_documents")
