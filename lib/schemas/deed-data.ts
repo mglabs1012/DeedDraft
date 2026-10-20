@@ -308,6 +308,7 @@ export const standardWorkspaceSchema = z.object({
   mode: z.literal("standard").default("standard"),
   modules: z.object({ naksha: z.boolean().default(false), consideration: z.boolean().default(false) }).default({}),
   processedDocuments: z.array(z.string().uuid()).max(500).default([]),
+  documentRoles: z.record(z.enum(["first", "second", "witness", "other"])).default({}),
 });
 
 export const deedDataSchema = z.object({

@@ -1,57 +1,111 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireWorkspace } from "@/lib/workspace";
 import { documentCategorySchema } from "@/lib/schemas/documents";
 import { unpackArchive } from "@/lib/uploads/archives";
 import { normalizeUpload } from "@/lib/uploads/normalize";
-import { extensionOf, MAX_UPLOAD_BYTES, supportedExtensions } from "@/lib/uploads/policy";
+import { extensionOf, MAX_UPLOAD_BYTES } from "@/lib/uploads/policy";
+import { mimeForUpload, storageOrigin } from "@/lib/uploads/mime";
+import { assignDocumentRoles } from "./standard";
 import type { Database } from "@/types/database";
 
 export type WorkspaceDocument = Pick<Database["public"]["Tables"]["deed_documents"]["Row"], "id" | "file_name" | "category" | "mime_type" | "size_bytes">;
+const uploadSchema = z.object({
+  deedId: z.string().uuid(), uploadId: z.string().uuid(), fileName: z.string().min(1).max(255),
+  size: z.number().int().positive().max(MAX_UPLOAD_BYTES),
+  category: documentCategorySchema, role: z.enum(["first", "second", "witness", "other"]).default("other"),
+});
+export type UploadRequest = z.input<typeof uploadSchema>;
 
-export async function uploadStandardDocuments(form: FormData): Promise<{ error?: string; documents: WorkspaceDocument[]; notices: string[] }> {
+async function context(input: unknown) {
+  const parsed = uploadSchema.safeParse(input);
+  if (!parsed.success) throw new Error("Check the file size (20 MB maximum) and name.");
+  const mime = mimeForUpload(parsed.data.fileName);
+  if (!mime) throw new Error("Unsupported file format.");
   const workspace = await requireWorkspace();
-  const parsed = z.object({ deedId: z.string().uuid(), category: documentCategorySchema }).safeParse({ deedId: form.get("deedId"), category: form.get("category") ?? "prior_title_deed" });
-  const file = form.get("file");
-  if (!parsed.success || !(file instanceof File)) return { error: "Choose a document to upload.", documents: [], notices: [] };
-  if (!file.size || file.size > MAX_UPLOAD_BYTES) return { error: "Each upload must be between 1 byte and 20 MB.", documents: [], notices: [] };
-  const ext = extensionOf(file.name);
-  if (!supportedExtensions.has(ext)) return { error: "Choose an image, PDF, Word document, ZIP or RAR file.", documents: [], notices: [] };
   const { data: deed } = await workspace.supabase.from("deeds").select("id").eq("id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
-  if (!deed) return { error: "Deed not found.", documents: [], notices: [] };
-  const documents: WorkspaceDocument[] = [];
-  const notices: string[] = [];
+  if (!deed) throw new Error("Deed not found or your session has expired.");
+  const prefix = workspace.firm.id + "/" + deed.id + "/" + parsed.data.uploadId;
+  return { workspace, input: parsed.data, mime, prefix, path: prefix + "/source." + extensionOf(parsed.data.fileName) };
+}
+
+/** Small authorization request only. File bytes travel directly to private Storage. */
+export async function prepareStandardUpload(input: unknown) {
   try {
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const bundle = ext === "zip" || ext === "rar" ? await unpackArchive(bytes, ext) : { files: [{ name: file.name, bytes }], skipped: [] };
+    const ctx = await context(input);
+    const { data: stored } = await ctx.workspace.supabase.storage.from("deed-documents").info(ctx.path);
+    if (stored?.size === ctx.input.size) return { uploaded: true, path: ctx.path };
+    const { data, error } = await ctx.workspace.supabase.storage.from("deed-documents").createSignedUploadUrl(ctx.path);
+    if (error || !data) return { error: "Could not authorize storage upload. Sign in again and check the private storage bucket policies." };
+    return { token: data.token, path: ctx.path, mime: ctx.mime, endpoint: storageOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL!) + "/storage/v1/upload/resumable" };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Could not prepare upload." }; }
+}
+
+function stableDocumentId(uploadId: string, index: number) {
+  const bytes = createHash("sha256").update(uploadId + ":" + index).digest().subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
+}
+
+/** Idempotent finalization: retries reuse deterministic row/object IDs, never duplicate documents. */
+export async function finishStandardUpload(input: unknown): Promise<{ error?: string; documents: WorkspaceDocument[]; notices: string[] }> {
+  const documents: WorkspaceDocument[] = [], notices: string[] = [];
+  try {
+    const ctx = await context(input);
+    const storage = ctx.workspace.supabase.storage.from("deed-documents");
+    const ext = extensionOf(ctx.input.fileName);
+    const firstId = stableDocumentId(ctx.input.uploadId, 0);
+    // Normal documents can return immediately on a retry after a lost response.
+    if (ext !== "zip" && ext !== "rar") {
+      const { data: existing } = await ctx.workspace.supabase.from("deed_documents").select("id, file_name, category, mime_type, size_bytes").eq("id", firstId).eq("firm_id", ctx.workspace.firm.id).eq("deed_id", ctx.input.deedId).maybeSingle();
+      if (existing) {
+        const assigned = await assignDocumentRoles({ id: ctx.input.deedId, documentIds: [existing.id], role: ctx.input.role });
+        return { documents: [existing], notices: [], ...(assigned.error ? { error: assigned.error } : {}) };
+      }
+    }
+    const { data: blob, error: downloadError } = await storage.download(ctx.path);
+    if (downloadError || !blob) throw new Error("Upload is not available in storage yet. Retry processing; the file does not need to be uploaded again.");
+    if (blob.size !== ctx.input.size || blob.size > MAX_UPLOAD_BYTES) throw new Error("The uploaded file size did not match. Please upload it again.");
+    const bytes = Buffer.from(await blob.arrayBuffer());
+    const bundle = ext === "zip" || ext === "rar" ? await unpackArchive(bytes, ext) : { files: [{ name: ctx.input.fileName, bytes }], skipped: [] };
     notices.push(...bundle.skipped.map((name) => "Skipped unsupported file: " + name));
-    for (const part of bundle.files) {
+    for (const [index, part] of bundle.files.entries()) {
+      const id = stableDocumentId(ctx.input.uploadId, index);
+      const { data: existing } = await ctx.workspace.supabase.from("deed_documents").select("id, file_name, category, mime_type, size_bytes").eq("id", id).eq("firm_id", ctx.workspace.firm.id).eq("deed_id", ctx.input.deedId).maybeSingle();
+      if (existing) { documents.push(existing); continue; }
       try {
         const normalized = await normalizeUpload(part);
         if (normalized.bytes.length > MAX_UPLOAD_BYTES) throw new Error("Converted document exceeds 20 MB.");
         const name = normalized.name.slice(-250);
-        const path = workspace.firm.id + "/" + deed.id + "/" + crypto.randomUUID() + "." + extensionOf(name);
-        const { error: uploadError } = await workspace.supabase.storage.from("deed-documents").upload(path, normalized.bytes, { contentType: normalized.mime, upsert: false });
-        if (uploadError) throw new Error("Storage upload failed. Check your connection and storage configuration.");
-        const { data: record, error: recordError } = await workspace.supabase.from("deed_documents").insert({
-          deed_id: deed.id, firm_id: workspace.firm.id, uploaded_by: workspace.user.id,
-          category: parsed.data.category, file_name: name, storage_path: path, mime_type: normalized.mime, size_bytes: normalized.bytes.length,
-        }).select("id, file_name, category, mime_type, size_bytes").single();
-        if (recordError || !record) {
-          await workspace.supabase.storage.from("deed-documents").remove([path]);
-          throw new Error("Could not save document metadata. Please retry.");
+        const original = bundle.files.length === 1 && ext !== "zip" && ext !== "rar" && normalized.bytes === bytes;
+        const path = original ? ctx.path : ctx.prefix + "/" + index + "." + extensionOf(name);
+        if (!original) {
+          const { error } = await storage.upload(path, normalized.bytes, { contentType: normalized.mime, upsert: true });
+          if (error) throw new Error("Converted file could not be stored. Retry processing.");
         }
-        documents.push(record);
+        const { data: record, error } = await ctx.workspace.supabase.from("deed_documents").upsert({
+          id, deed_id: ctx.input.deedId, firm_id: ctx.workspace.firm.id, uploaded_by: ctx.workspace.user.id,
+          category: ctx.input.category, file_name: name, storage_path: path, mime_type: normalized.mime, size_bytes: normalized.bytes.length,
+        }, { onConflict: "id", ignoreDuplicates: true }).select("id, file_name, category, mime_type, size_bytes").maybeSingle();
+        if (error) throw new Error("Document metadata could not be saved. Retry processing.");
+        if (record) documents.push(record);
+        else {
+          const { data: concurrent } = await ctx.workspace.supabase.from("deed_documents").select("id, file_name, category, mime_type, size_bytes").eq("id", id).eq("firm_id", ctx.workspace.firm.id).maybeSingle();
+          if (concurrent) documents.push(concurrent);
+        }
         if (normalized.note) notices.push(part.name + ": " + normalized.note);
-      } catch (error) {
-        notices.push(part.name + ": " + (error instanceof Error ? error.message : "Could not process this document."));
-      }
+      } catch (error) { notices.push(part.name + ": " + (error instanceof Error ? error.message : "Processing failed.")); }
     }
-    revalidatePath("/app/deeds/" + deed.id);
-    return { documents, notices, ...(!documents.length ? { error: "No documents were uploaded. See the file details below." } : {}) };
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "This archive could not be read. Try an unencrypted, single-volume archive.", documents, notices };
-  }
+    if (documents.length) {
+      const assigned = await assignDocumentRoles({ id: ctx.input.deedId, documentIds: documents.map((doc) => doc.id), role: ctx.input.role });
+      if (assigned.error) notices.push(assigned.error);
+    }
+    // Source containers are retained privately so a processing retry can recover partial success.
+    revalidatePath("/app/deeds/" + ctx.input.deedId);
+    return { documents, notices, ...(documents.length < bundle.files.length ? { error: "Some files still need attention. Retry processing to recover them without uploading again." } : {}) };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Processing failed. Your uploaded bytes can be retried.", documents, notices }; }
 }

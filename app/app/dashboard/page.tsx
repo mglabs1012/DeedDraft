@@ -10,7 +10,7 @@ export default async function DashboardPage() {
     .select("id, title, reference_no, updated_at").eq("firm_id", firm.id)
     .order("updated_at", { ascending: false }).limit(5);
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-6xl">
       <section className="pb-12 pt-8 sm:pt-14">
         <p className="text-xs font-medium uppercase tracking-[.2em] text-muted-foreground">Your drafting workspace</p>
         <h1 className="mt-4 text-3xl font-medium tracking-tight text-primary sm:text-5xl">Your papers. A clearer draft.</h1>

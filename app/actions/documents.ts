@@ -116,9 +116,25 @@ export async function deleteDocument(input: unknown): Promise<ActionResult> {
   const { workspace, document } = await findDocument(parsed.data.id);
   if (!document) return { error: "Document not found." };
 
+  const paths = [document.storage_path];
+  const parts = document.storage_path.split("/");
+  // New resumable uploads use a private, per-upload folder. Remove its retained
+  // source archive/image only when the last document from that upload is deleted.
+  if (parts.length === 4 && /^[0-9a-f-]{36}$/i.test(parts[2])) {
+    const prefix = parts.slice(0, 3).join("/");
+    const { data: siblings, error: readError } = await workspace.supabase.from("deed_documents")
+      .select("id").eq("firm_id", workspace.firm.id).eq("deed_id", document.deed_id)
+      .like("storage_path", prefix + "/%").neq("id", document.id).limit(1);
+    if (readError) return { error: "Could not check related documents. Please retry." };
+    if (!siblings?.length) {
+      const { data: objects, error: listError } = await workspace.supabase.storage.from("deed-documents").list(prefix, { limit: 100 });
+      if (listError) return { error: "Could not check the source files. Please retry." };
+      for (const object of objects ?? []) if (object.id && !object.name.includes("/")) paths.push(prefix + "/" + object.name);
+    }
+  }
   const { error: storageError } = await workspace.supabase.storage
     .from("deed-documents")
-    .remove([document.storage_path]);
+    .remove([...new Set(paths)]);
   if (storageError) return { error: userMessage(storageError) };
 
   const { error } = await workspace.supabase

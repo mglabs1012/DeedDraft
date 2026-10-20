@@ -10,6 +10,7 @@ import { generateEditable } from "@/lib/drafting";
 import { applyOperations, type EditableDraft } from "@/lib/drafting/editable";
 import { parseDeedData } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
+import { assertTaskActive, reportDraftStage } from "@/lib/ai/task-context";
 
 export async function loadStandardDrafts(input: unknown): Promise<{ error?: string; drafts: SavedDraft[] }> {
   const id = z.string().uuid().safeParse(input);
@@ -22,6 +23,7 @@ export async function loadStandardDrafts(input: unknown): Promise<{ error?: stri
 }
 
 export async function generateStandardDraft(input: unknown): Promise<{ error?: string; draft?: SavedDraft; notes?: string[] }> {
+  reportDraftStage("loading", "Loading your deed and instructions");
   const parsed = z.object({ id: z.string().uuid(), language: z.enum(["hindi", "english"]), instructions: z.string().trim().max(4000) }).safeParse(input);
   if (!parsed.success) return { error: "Check your instructions (maximum 4,000 characters)." };
   const workspace = await requireWorkspace();
@@ -33,6 +35,7 @@ export async function generateStandardDraft(input: unknown): Promise<{ error?: s
   let draft: EditableDraft;
   const notes: string[] = [];
   if (data.custom) {
+    reportDraftStage("drafting", "Preparing the document from your template and papers");
     const result = await draftFromTemplate({ id: deed.id, language: parsed.data.language });
     if (result.error !== undefined) return { error: result.error };
     draft = { language: parsed.data.language, blocks: [
@@ -41,10 +44,13 @@ export async function generateStandardDraft(input: unknown): Promise<{ error?: s
     ] };
   } else {
     if (isAiConfigured()) {
+      reportDraftStage("converting", "Checking names and addresses in the draft language");
       const converted = await convertForDraft({ deedId: deed.id, language: parsed.data.language });
       if (converted.error !== undefined) notes.push("Name conversion: " + converted.error);
       else data = { ...data, localized: converted.localized };
     }
+    assertTaskActive();
+    reportDraftStage("drafting", "Building the draft and applying your clause instructions");
     draft = generateEditable({ type: deed.deed_type, title: deed.title, referenceNo: deed.reference_no, data, firmName: workspace.firm.name, firmCity: workspace.firm.city }, parsed.data.language);
     if (isAiConfigured()) {
       const result = await chatEditDraft({ deedId: deed.id, draft, message: "Prepare this first draft using the saved matter facts. Follow these user drafting directions, adding, retaining or removing clauses as needed. Never invent missing facts; leave blanks for review.\n\n" + (parsed.data.instructions || "Retain the standard clauses and improve clarity.").slice(0, 3500), history: [] });
@@ -55,6 +61,8 @@ export async function generateStandardDraft(input: unknown): Promise<{ error?: s
       notes.push("AI is not configured. This is the standard template draft; your instructions are saved but have not been applied.");
     }
   }
+  reportDraftStage("saving", "Saving a new draft version");
+  assertTaskActive();
   const result = await saveDraftVersion({ deedId: deed.id, draft, note: isAiConfigured() ? "Standard Mode — generated with AI; requires review" : "Standard template — requires review" });
   return { ...result, notes };
 }

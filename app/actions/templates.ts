@@ -13,6 +13,7 @@ import { formFields, labelledAnswers } from "@/lib/templates/forms";
 import { getLibraryEntry, getTemplateText } from "@/lib/templates/library.server";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
+import { assertTaskActive } from "@/lib/ai/task-context";
 
 type Result<T = object> = { error: string } | ({ error?: undefined } & T);
 
@@ -103,6 +104,7 @@ export async function draftFromTemplate(input: unknown): Promise<Result<{ draft:
     if (!paragraphs.length) return { error: "The AI returned an empty draft. Please try again." };
     const draft: CustomDraft = { title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 300) : entry.title, paragraphs, generatedAt: new Date().toISOString(), edited: false };
 
+    assertTaskActive();
     const error = await saveCustom(workspace, deed.id, data, { ...custom, drafts: { ...custom.drafts, [parsed.data.language]: draft } }, "ai_drafted_document", {
       ...usageDetails(usage),
       template: entry.id,

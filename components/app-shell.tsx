@@ -26,7 +26,7 @@ export function AppShell({ children, firmName, userName, locale }: {
     <div className="min-h-screen bg-background">
       <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-card focus:p-4">Skip to workspace</a>
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-8">
+        <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between gap-4 px-4 sm:px-7 lg:px-10">
           <Link href="/app/dashboard" className="flex items-center gap-2 font-semibold tracking-tight text-primary"><Scale className="size-5" /><span>DeedDraft</span></Link>
           <nav aria-label="Main navigation" className="flex items-center gap-4 text-sm sm:gap-7">
             {[["/app/dashboard", "Home"], ["/app/deeds", "My deeds"]].map(([href, label]) => (
@@ -45,7 +45,7 @@ export function AppShell({ children, firmName, userName, locale }: {
           </nav>
         </div>
       </header>
-      <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 sm:px-8 sm:py-12">{children}</main>
+      <main id="main-content" className="mx-auto w-full max-w-[1800px] px-4 py-6 sm:px-7 lg:px-10">{children}</main>
     </div>
   );
 }

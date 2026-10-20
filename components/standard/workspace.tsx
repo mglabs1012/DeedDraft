@@ -2,22 +2,28 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRef, useState } from "react";
-import { ArrowLeft, ArrowUp, Check, FileText, LoaderCircle, Plus, UploadCloud } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, ArrowUp, Check, LoaderCircle, Plus, Square, UploadCloud, UserRound, Users } from "lucide-react";
 import { toast } from "sonner";
 import { updateDeedTitle, updateRemarks } from "@/app/actions/deeds";
-import { createDocumentSignedUrl, deleteDocument, recategorizeDocument } from "@/app/actions/documents";
+import { createDocumentSignedUrl, deleteDocument } from "@/app/actions/documents";
 import { processStandardDocument, saveStandardSection, standardSourceText, toggleStandardModule } from "@/app/actions/standard";
-import { generateStandardDraft, loadStandardDrafts } from "@/app/actions/standard-draft";
-import { uploadStandardDocuments, type WorkspaceDocument } from "@/app/actions/upload";
+import { loadStandardDrafts } from "@/app/actions/standard-draft";
+import type { WorkspaceDocument } from "@/app/actions/upload";
 import type { SavedDraft } from "@/app/actions/drafts";
 import { PartiesSection } from "@/components/deeds/sections/parties";
 import type { SaveSection } from "@/components/deeds/sections/shared";
 import { Button } from "@/components/ui/button";
 import { textareaClass } from "@/components/ui/field";
-import type { DeedData } from "@/lib/schemas/deed-data";
+import type { DeedData, PartyRole } from "@/lib/schemas/deed-data";
 import type { LibraryEntry } from "@/lib/templates/catalog";
-import { MAX_UPLOAD_BYTES, UPLOAD_ACCEPT } from "@/lib/uploads/policy";
+import { UPLOAD_ACCEPT } from "@/lib/uploads/policy";
+import { getDeedType } from "@/lib/deed-types";
+import { streamStandardDraft } from "@/lib/drafting/client-stream";
+import { useUploadEngine } from "./use-upload-engine";
+import { UploadProgress } from "./upload-progress";
+import { UploadWindow } from "./upload-window";
+import { DocumentList } from "./document-list";
 import type { Deed } from "@/types/database";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +50,11 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
   const [notices, setNotices] = useState<string[]>([]);
   const [states, setStates] = useState<Record<string, string>>({});
   const [dragging, setDragging] = useState(false);
-  const [category, setCategory] = useState<WorkspaceDocument["category"]>("prior_title_deed");
+  const [uploadRole, setUploadRole] = useState<PartyRole | null>(null);
+  const extractionQueue = useRef(Promise.resolve());
+  const [extracting, setExtracting] = useState(0);
+  const [draftStage, setDraftStage] = useState("");
+  const draftAbort = useRef<AbortController | null>(null);
   const [source, setSource] = useState<{ id: string; text: string; quality?: string } | null>(null);
   const [sourceLoading, setSourceLoading] = useState("");
   const sourceRequest = useRef(0);
@@ -53,6 +63,21 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
   const [drafts, setDrafts] = useState<SavedDraft[]>([]);
   const [language, setLanguage] = useState<"hindi" | "english">(deed.language === "english" ? "english" : "hindi");
   const fileInput = useRef<HTMLInputElement>(null);
+  const roles = getDeedType(deed.deed_type).roles;
+  useEffect(() => () => draftAbort.current?.abort(), []);
+  const uploads = useUploadEngine(deed.id, (added, messages, role) => {
+    setDocuments((current) => [...added, ...current.filter((doc) => !added.some((item) => item.id === doc.id))]);
+    setNotices((current) => [...current, ...messages]);
+    acceptData({ ...dataRef.current, workspace: { ...dataRef.current.workspace, documentRoles: { ...dataRef.current.workspace.documentRoles, ...Object.fromEntries(added.map((doc) => [doc.id, role])) } } });
+    setExtracting((count) => count + added.length);
+    extractionQueue.current = extractionQueue.current.then(async () => {
+      for (const doc of added) {
+        try { await extract(doc); } finally { setExtracting((count) => count - 1); }
+      }
+      const prior = added.find((doc) => doc.category === "prior_title_deed");
+      if (prior) await showSource(prior.id);
+    }).catch(() => { toast.error("Extraction was interrupted. Retry from the document list."); });
+  });
 
   async function guarded(label: string, task: () => Promise<void>) {
     if (lock.current) return;
@@ -99,31 +124,6 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
       setNotices((current) => [...current, document.file_name + ": " + (error instanceof Error ? error.message : "Extraction failed. The file is saved; retry below.")]);
     }
   }
-  function upload(files: FileList | File[]) {
-    const selected = Array.from(files);
-    if (!selected.length) return;
-    if (selected.length > 30) { toast.error("Upload up to 30 files at a time."); return; }
-    void guarded("Uploading papers…", async () => {
-      setNotices([]);
-      for (const file of selected) {
-        if (file.size > MAX_UPLOAD_BYTES) { setNotices((current) => [...current, file.name + ": exceeds the 20 MB limit."]); continue; }
-        setBusy("Uploading " + file.name + "…");
-        const form = new FormData();
-        form.set("deedId", deed.id); form.set("category", category); form.set("file", file);
-        let result: Awaited<ReturnType<typeof uploadStandardDocuments>>;
-        try { result = await uploadStandardDocuments(form); }
-        catch { setNotices((current) => [...current, file.name + ": upload interrupted. Check your connection and retry."]); continue; }
-        setNotices((current) => [...current, ...result.notices, ...(result.error ? [result.error] : [])]);
-        setDocuments((current) => [...result.documents, ...current]);
-        for (const document of result.documents) {
-          setBusy("Reading " + document.file_name + "…");
-          await extract(document);
-        }
-        const prior = result.documents.find((doc) => doc.category === "prior_title_deed");
-        if (prior) await showSource(prior.id);
-      }
-    });
-  }
   function toggle(module: "naksha" | "consideration") {
     void guarded("Saving workspace…", async () => {
       const result = await toggleStandardModule({ id: deed.id, module, enabled: !dataRef.current.workspace.modules[module] });
@@ -136,14 +136,31 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
     if (!result.url) return void toast.error(result.error || "Could not open the original.");
     window.open(result.url, "_blank", "noopener,noreferrer");
   };
-  const generate = () => void guarded(aiEnabled ? "Preparing your draft…" : "Preparing the template draft…", async () => {
-    const result = await generateStandardDraft({ id: deed.id, language, instructions });
-    if (result.error || !result.draft) throw new Error(result.error || "The draft could not be saved.");
-    setSavedInstructions(instructions);
-    setDrafts((current) => [result.draft!, ...current]);
-    setNotices(result.notes ?? []);
-    setView("draft");
+  const generate = () => void guarded("Preparing your draft…", async () => {
+    const abort = new AbortController(); draftAbort.current = abort; setDraftStage("loading");
+    const toastId = toast.loading("Preparing draft", { description: "Loading your papers and instructions" });
+    try {
+      const result = await streamStandardDraft({ id: deed.id, language, instructions }, abort.signal, (stage, message) => {
+        setDraftStage(stage); setBusy(message); toast.loading("Preparing draft", { id: toastId, description: message });
+      });
+      setSavedInstructions(instructions); setDrafts((current) => [result.draft, ...current]);
+      setNotices(result.notes); setView("draft");
+      toast.success("Draft saved", { id: toastId, description: "Version " + result.draft.version + " is ready for your review.", duration: 4500 });
+    } catch (error) {
+      if (abort.signal.aborted) toast.info("Drafting stopped", { id: toastId, description: "Your papers and saved work remain. Check Draft if saving had already started.", duration: 5000 });
+      else { toast.error("Drafting did not finish", { id: toastId, description: error instanceof Error ? error.message : "Please retry.", duration: 7000 }); }
+    } finally { draftAbort.current = null; setDraftStage(""); }
   });
+  const removeDocument = (doc: WorkspaceDocument) => {
+    if (!window.confirm("Delete " + doc.file_name + "? Details already extracted into the deed will remain.")) return;
+    void guarded("Removing document…", async () => {
+      const result = await deleteDocument({ id: doc.id });
+      if (result.error) throw new Error(result.error);
+      setDocuments((current) => current.filter((item) => item.id !== doc.id));
+      if (source?.id === doc.id) setSource(null);
+      toast.success("Document removed", { description: "Extracted deed details were kept.", duration: 3500 });
+    });
+  };
   const openDrafts = () => void guarded("Loading drafts…", async () => {
     const result = await loadStandardDrafts(deed.id);
     if (result.error) throw new Error(result.error);
@@ -171,47 +188,31 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
       </header>
 
       {!aiEnabled ? <p className="rounded-lg border border-border bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">AI is not configured. Upload and manual entry still work. <Link className="underline underline-offset-2" href="/app/settings">Configure AI</Link> to enable OCR, extraction and instruction-led drafting.</p> : null}
-      {busy ? <p role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-primary"><LoaderCircle className="size-4 animate-spin" />{busy} <span className="text-xs text-muted-foreground">Keep this page open.</span></p> : null}
+      {draftStage ? <section className="rounded-2xl border border-primary/15 bg-primary/[.03] p-5">
+        <div className="flex items-center justify-between gap-4"><p role="status" aria-live="polite" className="flex items-center gap-2 text-sm font-medium text-primary"><LoaderCircle className="size-4 animate-spin" />{busy}</p><Button variant="outline" className="h-9 shrink-0" type="button" onClick={() => draftAbort.current?.abort()}><Square className="size-3" /> Stop drafting</Button></div>
+        <ol className="mt-5 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">{[["loading", "Load facts"], ["converting", "Check language"], ["drafting", "Prepare clauses"], ["saving", "Save version"]].map(([stage, label], index, steps) => {
+          const current = steps.findIndex(([key]) => key === draftStage);
+          return <li key={stage} aria-current={stage === draftStage ? "step" : undefined} className={cn("flex items-center gap-2", current >= index ? "text-primary" : "text-muted-foreground")}><span className={cn("grid size-6 place-items-center rounded-full text-[10px]", current >= index ? "bg-primary text-primary-foreground" : "bg-secondary")}>{current > index ? <Check className="size-3" /> : index + 1}</span>{label}</li>;
+        })}</ol><p className="mt-3 text-[11px] text-muted-foreground">Live server stages, not an estimated percentage. Complex papers may take a few minutes.</p>
+      </section> : busy ? <p role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-primary"><LoaderCircle className="size-4 animate-spin" />{busy}</p> : null}
+      {extracting > 0 ? <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Reading details from {extracting} paper{extracting === 1 ? "" : "s"}. Uploads continue independently.</p> : null}
       {notices.length ? <details className="rounded-lg border border-amber-200 bg-amber-50/50 px-4 py-3 text-sm" open><summary className="cursor-pointer font-medium">Please review ({notices.length})</summary><ul className="mt-2 max-h-52 list-disc space-y-1 overflow-auto pl-5 text-xs leading-5">{notices.map((notice, index) => <li key={index}>{notice}</li>)}</ul></details> : null}
+      <UploadProgress jobs={uploads.jobs} pause={uploads.pause} resume={uploads.resume} />
+      <DocumentList documents={documents} states={{ ...Object.fromEntries(data.workspace.processedDocuments.map((id) => [id, "Extracted · review details"])), ...states }} onOpen={(id) => void openDocument(id)} onDelete={removeDocument} onExtract={aiEnabled ? (doc) => void guarded("Reading details…", () => extract(doc)) : undefined} disabled={Boolean(busy) || extracting > 0 || uploads.active} />
+      {uploadRole ? <UploadWindow key={uploadRole} role={uploadRole} deedType={deed.deed_type} documents={documents.filter((doc) => data.workspace.documentRoles[doc.id] === uploadRole)} jobs={uploads.jobs.filter((job) => job.role === uploadRole)} onClose={() => setUploadRole(null)} onUpload={(files, category) => uploads.enqueue(files, uploadRole, category)} onManual={(party) => save("parties", [...dataRef.current.parties, party])} onOpen={(id) => void openDocument(id)} onDelete={removeDocument} pause={uploads.pause} resume={uploads.resume} /> : null}
 
       {view === "draft" ? <StandardDraft deed={deed} data={data} firmName={firmName} firmCity={firmCity} aiEnabled={aiEnabled} drafts={drafts} onSaved={(draft) => setDrafts((current) => [draft, ...current])} /> : <>
         <section aria-labelledby="upload-heading">
-          <div className={cn("rounded-2xl border-2 border-dashed bg-card px-5 py-10 text-center transition sm:py-14", dragging ? "border-primary bg-primary/5" : "border-border")} onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); if (!busy) upload(event.dataTransfer.files); }}>
+          <div className={cn("rounded-2xl border border-dashed bg-card px-5 py-8 text-center transition sm:py-10", dragging ? "border-primary bg-primary/5" : "border-primary/25")} onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); if (!busy) uploads.enqueue(event.dataTransfer.files, "other", "prior_title_deed"); }}>
             <UploadCloud className="mx-auto size-8 stroke-[1.3] text-primary" />
             <h2 id="upload-heading" className="mt-4 text-xl font-medium text-primary">Drop your property papers here</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">Prior deeds, identity proofs or supporting papers.<br />AI reads the details; you stay in control.</p>
+            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">Upload prior deeds here. Use the person-specific windows below for identity proofs and supporting papers.</p>
             <Button type="button" className="mt-5 h-10" disabled={Boolean(busy)} onClick={() => fileInput.current?.click()}><Plus className="size-4" /> Choose files</Button>
-            <input aria-label="Upload deed documents" type="file" className="sr-only" ref={fileInput} multiple accept={UPLOAD_ACCEPT} disabled={Boolean(busy)} onChange={(event) => { if (event.target.files) upload(event.target.files); event.target.value = ""; }} />
+            <input aria-label="Upload deed documents" type="file" className="sr-only" ref={fileInput} multiple accept={UPLOAD_ACCEPT} disabled={Boolean(busy)} onChange={(event) => { if (event.target.files) uploads.enqueue(event.target.files, "other", "prior_title_deed"); event.target.value = ""; }} />
             <p className="mt-4 text-xs text-muted-foreground">PDF, images, Word, ZIP & RAR · 20 MB per upload</p>
-            <label className="mt-4 inline-flex items-center gap-2 text-xs text-muted-foreground">These papers are
-              <select aria-label="Document category" className="max-w-48 rounded-md border border-border bg-card px-2 py-1.5 text-foreground" disabled={Boolean(busy)} value={category} onChange={(event) => setCategory(event.target.value as WorkspaceDocument["category"])}>
-                <option value="prior_title_deed">Prior title deeds</option><option value="id_proof">Identity proofs</option><option value="naksha_map">Naksha / maps</option><option value="payment_proof">Payment proofs</option><option value="other">Other / mixed papers</option>
-              </select>
-            </label>
             <p className="mt-2 text-[11px] text-muted-foreground">Archives: up to 30 files / 60 MB unpacked. No encrypted or nested archives.</p>
           </div>
-          {documents.length ? <details className="mt-3" open={documents.length <= 3 ? true : undefined}><summary className="cursor-pointer text-xs text-muted-foreground">{documents.length} uploaded paper{documents.length === 1 ? "" : "s"} · manage files</summary>
-            <ul className="mt-2 divide-y divide-border">{documents.map((doc) => <li key={doc.id} className="flex flex-wrap items-center gap-2 py-3 text-xs">
-              <FileText className="size-4 shrink-0 text-muted-foreground" /><button onClick={() => void openDocument(doc.id)} type="button" className="min-w-0 flex-1 truncate text-left font-medium hover:underline">{doc.file_name}</button>
-              <span className="text-muted-foreground">{states[doc.id] || (data.workspace.processedDocuments.includes(doc.id) ? "Extracted · review details" : "Uploaded")}</span>
-              <select aria-label={"Category of " + doc.file_name} className="max-w-36 rounded border border-border bg-card p-1" value={doc.category} disabled={Boolean(busy)} onChange={(event) => {
-                const nextCategory = event.target.value as WorkspaceDocument["category"];
-                void guarded("Updating category…", async () => {
-                  const result = await recategorizeDocument({ id: doc.id, category: nextCategory });
-                  if (result.error) throw new Error(result.error);
-                  setDocuments((current) => current.map((item) => item.id === doc.id ? { ...item, category: nextCategory } : item));
-                });
-              }}>
-                <option value="prior_title_deed">Prior deed</option><option value="id_proof">ID proof</option><option value="naksha_map">Map</option><option value="payment_proof">Payment</option><option value="other">Other</option>
-                {!["prior_title_deed", "id_proof", "naksha_map", "payment_proof", "other"].includes(doc.category) ? <option value={doc.category}>{doc.category}</option> : null}
-              </select>
-              {aiEnabled && !data.workspace.processedDocuments.includes(doc.id) ? <button disabled={Boolean(busy)} className="rounded px-2 py-1 text-primary hover:bg-secondary" onClick={() => void guarded("Reading details…", () => extract(doc))} type="button">Extract</button> : null}
-              <button disabled={Boolean(busy)} className="rounded px-2 py-1 text-muted-foreground hover:text-destructive" type="button" onClick={() => {
-                if (!window.confirm("Remove this uploaded paper? Extracted details already added to the deed will remain.")) return;
-                void guarded("Removing file…", async () => { const result = await deleteDocument({ id: doc.id }); if (result.error) throw new Error(result.error); setDocuments((current) => current.filter((item) => item.id !== doc.id)); if (source?.id === doc.id) setSource(null); });
-              }}>Remove</button>
-            </li>)}</ul>
-          </details> : null}
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">{(["second", "first", "witness"] as const).map((role) => <button key={role} type="button" disabled={Boolean(busy)} onClick={() => setUploadRole(role)} className="group flex items-center gap-4 rounded-xl border border-border bg-card p-5 text-left transition hover:border-primary/35 hover:shadow-sm"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/5 text-primary">{role === "witness" ? <Users className="size-5" /> : <UserRound className="size-5" />}</span><span className="flex-1"><span className="block text-sm font-semibold text-primary">{role === "witness" ? "Witnesses" : roles[role].en.split(" (")[0]}</span><span className="mt-1 block text-xs text-muted-foreground">Upload documents or add manually</span></span><Plus className="size-4 text-muted-foreground group-hover:text-primary" /></button>)}</div>
         </section>
 
         <section className="rounded-xl border border-border bg-card" aria-labelledby="source-heading">
@@ -227,7 +228,7 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
           </div> : <p className="px-5 py-12 text-center text-sm text-muted-foreground">{documents.length ? "Choose a paper above to read its extracted text." : "Upload a prior deed to read its text here. You can also enter the details below without uploading."}</p>}
         </section>
 
-        <fieldset disabled={Boolean(busy)} className="min-w-0">
+        <fieldset disabled={Boolean(busy) || extracting > 0} className="min-w-0">
           <PartiesSection compact deedType={deed.deed_type} parties={data.parties} save={save} documentNames={Object.fromEntries(documents.map((doc) => [doc.id, doc.file_name]))} />
         </fieldset>
 
@@ -237,7 +238,7 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
           <button type="button" aria-expanded={details} className="ml-auto py-2 text-muted-foreground hover:text-primary" onClick={() => setDetails(!details)}>{details ? "Hide" : "Review"} property & other details</button>
         </div>
         {data.workspace.modules.naksha ? <section className="rounded-xl border border-border bg-card p-5">
-          <h2 className="font-medium text-primary">Naksha / property map</h2><p className="mt-1 text-xs text-muted-foreground">Upload with the “Naksha / maps” category above, then open the original here.</p>
+          <h2 className="font-medium text-primary">Naksha / property map</h2><label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-4 py-3 text-xs text-primary"><UploadCloud className="size-4" /> Upload map<input className="sr-only" type="file" multiple accept={UPLOAD_ACCEPT} onChange={(event) => { if (event.target.files) uploads.enqueue(event.target.files, "other", "naksha_map"); event.target.value = ""; }} /></label>
           <ul className="mt-3 space-y-2">{documents.filter((doc) => doc.category === "naksha_map").map((doc) => <li key={doc.id}><button type="button" className="text-sm text-primary underline underline-offset-2" onClick={() => void openDocument(doc.id)}>{doc.file_name}</button></li>)}</ul>
           <label className="mt-4 flex items-center gap-2 text-sm"><input type="checkbox" checked={data.execution.mapAttached} disabled={Boolean(busy)} onChange={(event) => void save("execution", { ...data.execution, mapAttached: event.target.checked })} />State in the draft that a map is attached</label>
           <p className="mt-1 text-xs text-muted-foreground">Hiding this panel does not remove a map or change the deed.</p>
@@ -256,7 +257,7 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
           <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <label className="text-xs text-muted-foreground">Draft in <select aria-label="Draft language" className="ml-1 rounded-lg border border-border bg-background p-2 text-foreground" value={language} disabled={Boolean(busy)} onChange={(event) => setLanguage(event.target.value as "hindi" | "english")}><option value="hindi">हिंदी</option><option value="english">English</option></select></label>
             <button type="button" disabled={Boolean(busy) || instructions === savedInstructions} className="text-xs text-muted-foreground hover:text-primary disabled:opacity-50" onClick={() => void guarded("Saving instructions…", async () => { const result = await updateRemarks({ id: deed.id, remarks: instructions }); if (result.error) throw new Error(result.error); setSavedInstructions(instructions); toast.success("Instructions saved."); })}>{instructions === savedInstructions ? "Instructions saved" : "Save instructions"}</button>
-            <Button className="ml-auto h-10" disabled={Boolean(busy)} onClick={generate} type="button">{busy.includes("draft") ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}{drafts.length ? "Prepare new version" : "Prepare draft"}</Button>
+            <Button className="ml-auto h-10" disabled={Boolean(busy) || uploads.active || extracting > 0} onClick={generate} type="button">{draftStage ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}{drafts.length ? "Prepare new version" : "Prepare draft"}</Button>
           </div>
           <p className="mt-3 text-[11px] leading-5 text-muted-foreground">AI-generated details and clauses require your review. Missing facts remain blank. Every generated draft is saved as a new version.</p>
         </section>

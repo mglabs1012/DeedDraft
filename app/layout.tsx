@@ -33,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         {children}
-        <Toaster closeButton position="top-right" richColors />
+        <Toaster closeButton position="bottom-right" richColors visibleToasts={3} duration={4500} toastOptions={{ className: "shadow-lg", style: { borderRadius: "12px" } }} />
       </body>
     </html>
   );

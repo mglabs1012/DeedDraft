@@ -138,7 +138,7 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
   );
 }
 
-function PartyForm({ initial, defaultRole, roleLabels, onSubmit, ai }: { initial?: Party; defaultRole: PartyRole; roleLabels: Record<PartyRole, string>; onSubmit: (party: Party) => void; ai: AiTarget }) {
+export function PartyForm({ initial, defaultRole, roleLabels, onSubmit, ai }: { initial?: Party; defaultRole: PartyRole; roleLabels: Record<PartyRole, string>; onSubmit: (party: Party) => void; ai: AiTarget }) {
   const form = useForm<z.input<typeof partySchema>, unknown, Party>({
     resolver: zodResolver(partySchema),
     defaultValues: initial ?? {

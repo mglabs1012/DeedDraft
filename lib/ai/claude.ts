@@ -1,4 +1,5 @@
 import "server-only";
+import { assertTaskActive, taskSignal } from "./task-context";
 
 import {
   BedrockRuntimeClient,
@@ -157,7 +158,7 @@ async function converse(options: CallOptions & { toolConfig?: ConstructorParamet
         inferenceConfig: { maxTokens: options.maxTokens ?? 8192, temperature: options.temperature ?? 0.2 },
         ...(options.toolConfig ? { toolConfig: options.toolConfig } : {}),
       }),
-      { abortSignal: AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS) },
+      { abortSignal: AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS), ...(taskSignal() ? [taskSignal()!] : [])]) },
     );
     if (response.stopReason === "max_tokens") throw new AiError("The AI response was cut off at the output limit. Try fewer or smaller documents.");
     if (response.stopReason === "content_filtered" || response.stopReason === "guardrail_intervened") throw new AiError("The AI declined to process this request.");
@@ -171,6 +172,7 @@ async function converse(options: CallOptions & { toolConfig?: ConstructorParamet
     };
     return { blocks: response.output?.message?.content ?? [], usage };
   } catch (error) {
+    assertTaskActive();
     throw describe(error, model);
   }
 }

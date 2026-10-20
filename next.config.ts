@@ -11,6 +11,7 @@ const supabase = (() => {
   }
 })();
 const supabaseSocket = supabase.replace(/^http/, "ws");
+const storageHost = supabase.replace(/^https:\/\/([a-z0-9-]+)\.supabase\.co$/, "https://$1.storage.supabase.co");
 
 /**
  * Content-Security-Policy: scripts, frames and connections only from this site
@@ -23,7 +24,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: " + supabase,
   "font-src 'self' data:",
-  "connect-src 'self' " + supabase + " " + supabaseSocket + (isDev ? " ws: wss:" : ""),
+  "connect-src 'self' " + supabase + " " + storageHost + " " + supabaseSocket + (isDev ? " ws: wss:" : ""),
   "frame-src 'self' blob: " + supabase,
   "worker-src 'self' blob:",
   "object-src 'none'",

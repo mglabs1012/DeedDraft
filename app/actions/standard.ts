@@ -54,19 +54,40 @@ export async function toggleStandardModule(input: unknown): Promise<Result> {
   }));
 }
 
+export async function assignDocumentRoles(input: unknown): Promise<Result> {
+  const parsed = z.object({ id: z.string().uuid(), documentIds: z.array(z.string().uuid()).max(30), role: z.enum(["first", "second", "witness", "other"]) }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid document role." };
+  const workspace = await requireWorkspace();
+  const { data: docs, error } = await workspace.supabase.from("deed_documents").select("id").eq("firm_id", workspace.firm.id).eq("deed_id", parsed.data.id).in("id", parsed.data.documentIds);
+  if (error || docs?.length !== parsed.data.documentIds.length) return { error: "Some uploaded documents could not be found." };
+  return mutate(parsed.data.id, (data) => ({ workspace: {
+    ...data.workspace,
+    documentRoles: { ...data.workspace.documentRoles, ...Object.fromEntries(parsed.data.documentIds.map((id) => [id, parsed.data.role])) },
+  } }));
+}
+
 export async function processStandardDocument(input: unknown): Promise<Result & { warnings?: string[] }> {
   const parsed = z.object({ deedId: z.string().uuid(), documentId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { error: "Invalid document." };
   const workspace = await requireWorkspace();
   const { data: deed } = await workspace.supabase.from("deeds").select("data").eq("id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
   if (!deed) return { error: "Deed not found." };
+  const { data: sourceDocument } = await workspace.supabase.from("deed_documents").select("category").eq("id", parsed.data.documentId).eq("deed_id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
+  if (!sourceDocument) return { error: "Document not found." };
   if (parseDeedData(deed.data).workspace.processedDocuments.includes(parsed.data.documentId)) return { data: parseDeedData(deed.data) };
   const extracted = await extractFromDocument(parsed.data);
   if (extracted.error !== undefined) return { error: extracted.error };
   const result = await mutate(parsed.data.deedId, (current) => {
     if (current.workspace.processedDocuments.includes(parsed.data.documentId)) return {};
     const merged = mergeExtraction(current, {
-      parties: extracted.extraction.parties.map((party) => ({ ...party, documentIds: [parsed.data.documentId] })),
+      parties: extracted.extraction.parties.map((party) => ({
+        ...party,
+        // A dedicated person's upload window establishes the role of identity proofs.
+        // Property papers retain the extraction's title-history interpretation.
+        role: sourceDocument.category === "id_proof" && current.workspace.documentRoles[parsed.data.documentId] && current.workspace.documentRoles[parsed.data.documentId] !== "other"
+          ? current.workspace.documentRoles[parsed.data.documentId] : party.role,
+        documentIds: [parsed.data.documentId],
+      })),
       properties: extracted.extraction.properties, titleChain: extracted.extraction.titleChain,
       payments: extracted.extraction.payments, consideration: extracted.extraction.consideration,
     });
