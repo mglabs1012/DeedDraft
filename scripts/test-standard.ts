@@ -8,6 +8,7 @@ import { unpackArchive } from "../lib/uploads/archives";
 import { normalizeUpload } from "../lib/uploads/normalize";
 import { checkEntry, MAX_EXPANDED_BYTES, MAX_UPLOAD_BYTES, safeArchiveName } from "../lib/uploads/policy";
 import { uploadPaths } from "../lib/uploads/paths";
+import { signedUploadEndpoint } from "../lib/uploads/mime";
 
 function crc32(bytes: Buffer) {
   let crc = 0xffffffff;
@@ -74,6 +75,10 @@ async function main() {
       assert.ok(path.split("/")[2].startsWith(upload + "-"));
     }
     assert.equal(uploadPaths(firm, deed, upload, "pdf").path, paths.path);
+  });
+  await test("Signed upload tokens use the signed TUS endpoint", () => {
+    assert.equal(signedUploadEndpoint("https://example.supabase.co"), "https://example.storage.supabase.co/storage/v1/upload/resumable/sign");
+    assert.equal(signedUploadEndpoint("http://127.0.0.1:54321"), "http://127.0.0.1:54321/storage/v1/upload/resumable/sign");
   });
   await test("Optional modules are hidden for new AND legacy deeds; settings round-trip", () => {
     assert.deepEqual(emptyDeedData().workspace.modules, { naksha: false, consideration: false });

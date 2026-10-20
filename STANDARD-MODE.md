@@ -40,6 +40,8 @@ An authenticated smoke test is still needed against the intended Supabase/Bedroc
 
 The zero-byte authorization error was caused by a new four-segment upload path conflicting with the original three-segment storage policy. The uploader now uses the original supported layout, including converted/archive files. The fix does not require public access, disabling RLS, or signing in again. Reload the app and reselect the failed file after the update; no bytes from that failed authorization were saved.
 
+The subsequent HTTP 400 after sending bytes was caused by sending signed tokens to the regular TUS endpoint. Signed uploads now use `/storage/v1/upload/resumable/sign` and the public API key, matching Supabase's signed-upload example. The fingerprint version was changed to avoid reusing sessions created at the wrong endpoint. Live synthetic tests verified 1,024-byte and 6,292,480-byte transfers and stored sizes; test objects were removed afterward. This transport test uses an administrator-issued signed token, not an end-user RLS or OCR/draft integration test. Run it explicitly with `npx tsx scripts/test-live-upload.ts` when needed; it is not part of offline `npm test`.
+
 Migration `0008` additionally qualifies deed/firm correlations in metadata policies and validates storage paths. It is prepared locally, not automatically applied to the remote database. Run the complete SQL bundle before testing OCR and saved drafts.
 
 ## Verification and limitations

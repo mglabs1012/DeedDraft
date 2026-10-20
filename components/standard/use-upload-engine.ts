@@ -17,7 +17,8 @@ function readableError(error: unknown) {
   const code = error instanceof DetailedError ? error.originalResponse?.getStatus() : undefined;
   if (code === 401 || code === 403) return "Upload authorization expired. Sign in again, then retry.";
   if (code === 413) return "Storage rejected the file size. Maximum 20 MB.";
-  if (code === 415 || code === 400) return "Storage rejected this file. Check the allowed formats (migration 0007) and retry.";
+  if (code === 415) return "Storage rejected this document format.";
+  if (code === 400) return "Storage rejected the upload request (HTTP 400). Retry to request a fresh upload authorization.";
   if (code === 409) return "Another upload is using this file destination. Retry processing or start again.";
   if (!navigator.onLine) return "You are offline. Reconnect, then resume this upload.";
   // TUS errors contain signed URLs; never expose them in toasts, logs or the UI.
@@ -59,11 +60,11 @@ export function useUploadEngine(deedId: string, onUploaded: (documents: Workspac
         await new Promise<void>((resolve, reject) => {
           const upload = new Upload(job.file, {
             endpoint: prepared.endpoint,
-            headers: { "x-signature": prepared.token! },
+            headers: { "x-signature": prepared.token!, apikey: prepared.publicKey! },
             chunkSize: 6 * 1024 * 1024,
             retryDelays: [0, 1500, 3000, 5000, 10000, 20000],
             uploadDataDuringCreation: true, removeFingerprintOnSuccess: true,
-            fingerprint: async () => "deeddraft:" + prepared.path,
+            fingerprint: async () => "deeddraft:signed-v2:" + prepared.path,
             metadata: { bucketName: "deed-documents", objectName: prepared.path!, contentType: prepared.mime!, cacheControl: "3600" },
             onBeforeRequest: (request) => {
               // Time out a stalled chunk, not the whole file. Confirmed chunks remain resumable.
@@ -99,7 +100,7 @@ export function useUploadEngine(deedId: string, onUploaded: (documents: Workspac
           handles.current.set(job.id, { upload, reject });
           void upload.findPreviousUploads().then((previous) => {
             if (job.state === "paused" || !alive.current) return reject(new Error("paused"));
-            const match = previous.find((item) => item.metadata.objectName === prepared.path);
+            const match = previous.find((item) => item.metadata.objectName === prepared.path && item.uploadUrl?.startsWith(prepared.endpoint + "/"));
             if (match) upload.resumeFromPreviousUpload(match);
             upload.start();
           }).catch(reject);

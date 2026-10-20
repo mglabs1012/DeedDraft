@@ -12,3 +12,8 @@ export function storageOrigin(projectUrl: string) {
   if (/^[a-z0-9-]+\.supabase\.co$/.test(url.hostname)) url.hostname = url.hostname.replace(".supabase.co", ".storage.supabase.co");
   return url.origin;
 }
+
+/** x-signature tokens require the signed TUS route, not the session-auth route. */
+export function signedUploadEndpoint(projectUrl: string) {
+  return storageOrigin(projectUrl) + "/storage/v1/upload/resumable/sign";
+}

@@ -8,7 +8,7 @@ import { documentCategorySchema } from "@/lib/schemas/documents";
 import { unpackArchive } from "@/lib/uploads/archives";
 import { normalizeUpload } from "@/lib/uploads/normalize";
 import { extensionOf, MAX_UPLOAD_BYTES } from "@/lib/uploads/policy";
-import { mimeForUpload, storageOrigin } from "@/lib/uploads/mime";
+import { mimeForUpload, signedUploadEndpoint } from "@/lib/uploads/mime";
 import { uploadPaths } from "@/lib/uploads/paths";
 import { assignDocumentRoles } from "./standard";
 import type { Database } from "@/types/database";
@@ -49,7 +49,7 @@ export async function prepareStandardUpload(input: unknown) {
         : "Storage could not authorize this upload. Retry; if it persists, the workspace administrator must check storage permissions.",
         retryable: ["429", "500", "502", "503", "504"].includes(status) };
     }
-    return { token: data.token, path: ctx.path, mime: ctx.mime, endpoint: storageOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL!) + "/storage/v1/upload/resumable" };
+    return { token: data.token, path: ctx.path, mime: ctx.mime, endpoint: signedUploadEndpoint(process.env.NEXT_PUBLIC_SUPABASE_URL!), publicKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY! };
   } catch (error) { return { error: error instanceof Error ? error.message : "Could not prepare upload." }; }
 }
 
