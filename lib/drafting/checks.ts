@@ -10,6 +10,9 @@ import { getDeedType, type DeedType, type SectionId } from "@/lib/deed-types";
 import type { DeedData, Party } from "@/lib/schemas/deed-data";
 import { isValidAadhaar } from "@/lib/text/aadhaar";
 
+import type { DraftDocument } from "./blocks";
+import { blockTexts, repeatedTopics } from "./boilerplate";
+
 export type CheckSeverity = "error" | "warning";
 export type FinalCheck = { id: string; severity: CheckSeverity; message: string; tab: SectionId };
 
@@ -113,6 +116,16 @@ export function finalChecks(type: DeedType, data: DeedData, draftText = "", toda
     if (!property.area) add("area-" + property.id, "warning", "Area is missing for " + (property.identifier || property.description || "a property") + ". Registration needs the area.", "properties");
   }
 
+  /* -- Schedule of property: the bounding clause is cross-verified at e-Panjiyan */
+  {
+    for (const property of data.properties) {
+      const name = property.identifier || property.description || "a property";
+      if (!property.identifier && !property.khasra && !property.plotNo && !property.surveyNo && !property.khataNo) add("schedule-number-" + property.id, "warning", "The schedule of " + name + " has no plot, khasra, survey or khata number. The deed must identify the property exactly.", "properties");
+      const open = (["east", "west", "north", "south"] as const).filter((side) => !property[side]);
+      if (open.length) add("schedule-bounds-" + property.id, "warning", "Boundaries missing for " + name + " (" + open.join(", ") + "). All four boundaries prevent boundary disputes and are checked at registration.", "properties");
+    }
+  }
+
   /* -- Dates */
   if (data.execution.date) {
     const days = daysFromToday(data.execution.date, today);
@@ -129,4 +142,24 @@ export function finalChecks(type: DeedType, data: DeedData, draftText = "", toda
   }
 
   return checks.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1));
+}
+
+/**
+ * Repetition check on the final documents: a topic that belongs in one clause
+ * (jurisdiction, severability, entire agreement …) written in two, and exact or
+ * near-duplicate clauses that were removed automatically.
+ */
+export function clauseChecks(documents: DraftDocument[], removed: Partial<Record<"hindi" | "english", string[]>> = {}): FinalCheck[] {
+  const checks: FinalCheck[] = [];
+  const many = documents.length > 1;
+  for (const document of documents) {
+    const where = many ? " in the " + (document.language === "hindi" ? "Hindi" : "English") + " draft" : "";
+    for (const topic of repeatedTopics(blockTexts(document.blocks))) {
+      checks.push({ id: "repeat-" + document.language + "-" + topic.id, severity: "warning", message: "The " + topic.label.toLowerCase() + " clause appears " + topic.count + " times" + where + ". Keep one and remove the others (check Additional clauses and AI edits).", tab: "terms" });
+    }
+    (removed[document.language] ?? []).forEach((text, index) => {
+      checks.push({ id: "removed-" + document.language + "-" + index, severity: "warning", message: "A repeated clause was left out" + where + ": “" + (text.length > 90 ? text.slice(0, 90) + "…" : text) + "”. Remove the copy from Additional clauses or your edits.", tab: "terms" });
+    });
+  }
+  return checks;
 }

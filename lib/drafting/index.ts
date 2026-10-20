@@ -2,6 +2,8 @@ import { getDeedType, type DeedType, type DraftLanguage, type SectionId } from "
 import type { DeedData } from "@/lib/schemas/deed-data";
 
 import { renderDraftHtml, type Block, type DraftDocument } from "./blocks";
+import { withBoilerplate } from "./boilerplate";
+import { dedupeBlocks } from "./dedupe";
 import { createContext, paymentsTotal, type Ctx, type DraftInput } from "./common";
 import { fromEditable, toEditable, type EditableDraft } from "./editable";
 import { convertText, localizeData } from "./localize";
@@ -52,7 +54,9 @@ export function buildDraftDocuments(input: DraftInput, choice: DraftChoice, over
     if (edited) return fromEditable(edited);
     // Names, addresses and other typed text in the script of this language (see localize.ts).
     const localized: DraftInput = { ...input, data: localizeData(input.data, language), firmCity: convertText(input.firmCity, language, input.data.localized?.[language] ?? {}) ?? input.firmCity };
-    return { language, blocks: templates[input.type](createContext(localized, language)) };
+    const ctx = createContext(localized, language);
+    // Standard boilerplate the template does not already cover, then the no-repetition check.
+    return { language, blocks: dedupeBlocks(withBoilerplate(ctx, templates[input.type](ctx))).blocks };
   });
 }
 
