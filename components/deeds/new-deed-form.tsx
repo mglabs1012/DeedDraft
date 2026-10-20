@@ -34,7 +34,7 @@ export function NewDeedForm({ library, initialType, initialTemplate }: { library
     }
   };
   return (
-    <div aria-busy={Boolean(selected)}>
+    <div data-tour="templates" aria-busy={Boolean(selected)}>
       {selected ? <p role="status" className="mb-4 flex items-center gap-2 text-sm"><LoaderCircle className="size-4 animate-spin" /> Opening {selected}…</p> : null}
       <fieldset disabled={Boolean(selected)} className="min-w-0">
         {suggested ? <button type="button" className="mb-5 w-full rounded-xl border border-primary/20 bg-primary/5 p-4 text-left text-sm font-medium text-primary" onClick={() => void choose(suggested)}>Start with {suggested.title} →</button> : null}

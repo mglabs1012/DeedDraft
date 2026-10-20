@@ -22,7 +22,7 @@ export function StandardDraft({ deed, data, firmName, firmCity, aiEnabled, draft
   }])) as Record<"hindi" | "english", () => EditableDraft>, [data, deed, firmName, firmCity]);
   const checks = finalChecks(deed.deed_type, data, "");
   if (!languages.length) return <p>No saved draft yet.</p>;
-  return <div className="space-y-4">
+  return <div data-tour="draft-review" className="space-y-4">
     <p className="text-xs leading-5 text-muted-foreground">Review before signing or registration. Ask the assistant to add, retain or remove clauses, then apply its proposed edits. Saved versions preserve your work; changes to matter details require preparing a new version.</p>
     {checks.length ? <details className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 text-xs"><summary className="cursor-pointer font-medium">{checks.length} checks to review</summary><ul className="mt-2 list-disc space-y-1 pl-5">{checks.map((check) => <li key={check.id}>{check.message}</li>)}</ul></details> : null}
     <DraftStudio deedId={deed.id} languages={languages} generated={generated} saved={drafts} aiEnabled={aiEnabled} onSaved={onSaved} exportTitle={deed.reference_no + " - " + deed.title} />

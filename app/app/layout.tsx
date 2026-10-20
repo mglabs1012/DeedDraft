@@ -10,5 +10,5 @@ export default async function ProtectedLayout({ children }: { children: React.Re
     workspace.supabase.from("profiles").select("full_name").eq("id", workspace.user.id).maybeSingle(),
     getLocale(),
   ]);
-  return <AppShell firmName={workspace.firm.name} locale={locale} userName={profile?.full_name ?? "Account"}>{children}</AppShell>;
+  return <AppShell firmName={workspace.firm.name} locale={locale} userId={workspace.user.id} userName={profile?.full_name ?? "Account"}>{children}</AppShell>;
 }

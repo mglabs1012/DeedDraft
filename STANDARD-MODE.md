@@ -1,5 +1,13 @@
 # Standard Mode
 
+## Guided first-use tutorial
+
+- On first visiting the signed-in Home, template picker, workspace and draft view, a short spotlight tour explains that screen. Next, Back, Got it, Skip tutorial and Escape are supported.
+- Skip stops automatic tours. Quick tour in the header replays the current screen's guide. Preferences are per user in this browser's local storage, not synced between devices. Clearing browser storage resets them; blocked storage falls back to in-memory behavior.
+- Small question-mark controls provide hover, keyboard-focus and tap help for uploads, optional modules and drafting instructions. Escape dismisses help.
+- The walkthrough never creates a deed, selects a template, uploads papers or invokes AI. Those actions remain explicit user choices. Legal review reminders appear before drafting and exporting.
+- Browser verification used an isolated synthetic preview (removed after testing), because the preview browser was signed out. Verified auto-start, Next/Back, completion persistence, next-screen guidance, Escape/Skip persistence, replay and tap help. Signed-in integration still needs a user smoke test.
+
 ## What changed
 
 - Home offers Standard Mode and a non-interactive Premium Mode placeholder.

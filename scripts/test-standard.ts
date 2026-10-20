@@ -9,6 +9,7 @@ import { normalizeUpload } from "../lib/uploads/normalize";
 import { checkEntry, MAX_EXPANDED_BYTES, MAX_UPLOAD_BYTES, safeArchiveName } from "../lib/uploads/policy";
 import { uploadPaths } from "../lib/uploads/paths";
 import { signedUploadEndpoint } from "../lib/uploads/mime";
+import { tours, parseTourPreferences } from "../lib/onboarding";
 
 function crc32(bytes: Buffer) {
   let crc = 0xffffffff;
@@ -64,6 +65,16 @@ async function main() {
   async function test(name: string, run: () => unknown | Promise<unknown>) {
     await run(); checks++; console.log("  ✓ " + name);
   }
+  await test("Tutorial preferences tolerate missing/corrupt storage and only accept known stages", () => {
+    assert.deepEqual(parseTourPreferences(null), { skipped: false, completed: [] });
+    assert.deepEqual(parseTourPreferences("broken"), { skipped: false, completed: [] });
+    assert.deepEqual(parseTourPreferences("null"), { skipped: false, completed: [] });
+    assert.deepEqual(parseTourPreferences('{"skipped":true,"completed":["home",null,42,"unknown","workspace"]}'), { skipped: true, completed: ["home", "workspace"] });
+    for (const tour of Object.values(tours)) {
+      assert.ok(tour.steps.length >= 2);
+      for (const step of tour.steps) assert.ok(step.title && step.text && /^[a-z-]+$/.test(step.target));
+    }
+  });
   await test("Resumable source and converted files match deployed three-part Storage RLS", () => {
     const firm = "11111111-1111-4111-8111-111111111111";
     const deed = "22222222-2222-4222-8222-222222222222";

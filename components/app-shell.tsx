@@ -8,9 +8,10 @@ import { signOut } from "@/app/actions/auth";
 import { setLocale } from "@/app/actions/locale";
 import type { Locale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { GuidedTour } from "@/components/guided-tour";
 
-export function AppShell({ children, firmName, userName, locale }: {
-  children: React.ReactNode; firmName: string; userName: string; locale: Locale;
+export function AppShell({ children, firmName, userName, userId, locale }: {
+  children: React.ReactNode; firmName: string; userName: string; userId: string; locale: Locale;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -32,6 +33,7 @@ export function AppShell({ children, firmName, userName, locale }: {
             {[["/app/dashboard", "Home"], ["/app/deeds", "My deeds"]].map(([href, label]) => (
               <Link key={href} href={href} aria-current={path === href ? "page" : undefined} className={cn("py-2 hover:text-primary", path === href ? "font-medium text-primary" : "text-muted-foreground")}>{label}</Link>
             ))}
+            <GuidedTour key={userId} userId={userId} />
             <div className="relative" ref={menu}>
               <button aria-expanded={open} aria-controls="account-menu" onClick={() => setOpen(!open)} className="flex items-center gap-1 rounded-lg py-2 text-muted-foreground hover:text-primary" type="button"><span className="hidden sm:inline">{userName.split(" ")[0]}</span><span className="sm:hidden">Account</span><ChevronDown className="size-3.5" /></button>
               {open ? <div id="account-menu" className="absolute right-0 z-40 mt-2 w-60 rounded-xl border border-border bg-card p-2 shadow-lg">

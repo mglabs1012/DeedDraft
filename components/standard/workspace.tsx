@@ -26,6 +26,7 @@ import { UploadWindow } from "./upload-window";
 import { DocumentList } from "./document-list";
 import type { Deed } from "@/types/database";
 import { cn } from "@/lib/utils";
+import { HelpTip } from "@/components/guided-tour";
 
 const PropertiesSection = dynamic(() => import("@/components/deeds/sections/properties").then((m) => m.PropertiesSection));
 const TitleChainSection = dynamic(() => import("@/components/deeds/sections/title-chain").then((m) => m.TitleChainSection));
@@ -202,20 +203,20 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
       {uploadRole ? <UploadWindow key={uploadRole} role={uploadRole} deedType={deed.deed_type} documents={documents.filter((doc) => data.workspace.documentRoles[doc.id] === uploadRole)} jobs={uploads.jobs.filter((job) => job.role === uploadRole)} onClose={() => setUploadRole(null)} onUpload={(files, category) => uploads.enqueue(files, uploadRole, category)} onManual={(party) => save("parties", [...dataRef.current.parties, party])} onOpen={(id) => void openDocument(id)} onDelete={removeDocument} pause={uploads.pause} resume={uploads.resume} /> : null}
 
       {view === "draft" ? <StandardDraft deed={deed} data={data} firmName={firmName} firmCity={firmCity} aiEnabled={aiEnabled} drafts={drafts} onSaved={(draft) => setDrafts((current) => [draft, ...current])} /> : <>
-        <section aria-labelledby="upload-heading">
+        <section data-tour="paper-upload" aria-labelledby="upload-heading">
           <div className={cn("rounded-2xl border border-dashed bg-card px-5 py-8 text-center transition sm:py-10", dragging ? "border-primary bg-primary/5" : "border-primary/25")} onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); if (!busy) uploads.enqueue(event.dataTransfer.files, "other", "prior_title_deed"); }}>
             <UploadCloud className="mx-auto size-8 stroke-[1.3] text-primary" />
-            <h2 id="upload-heading" className="mt-4 text-xl font-medium text-primary">Drop your property papers here</h2>
+            <h2 id="upload-heading" className="mt-4 text-xl font-medium text-primary">Drop your property papers here<HelpTip text="Start with the previous deed or property papers. Wait for Saved, then check the details read from them. You can resume an interrupted upload." /></h2>
             <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">Upload prior deeds here. Use the person-specific windows below for identity proofs and supporting papers.</p>
             <Button type="button" className="mt-5 h-10" disabled={Boolean(busy)} onClick={() => fileInput.current?.click()}><Plus className="size-4" /> Choose files</Button>
             <input aria-label="Upload deed documents" type="file" className="sr-only" ref={fileInput} multiple accept={UPLOAD_ACCEPT} disabled={Boolean(busy)} onChange={(event) => { if (event.target.files) uploads.enqueue(event.target.files, "other", "prior_title_deed"); event.target.value = ""; }} />
             <p className="mt-4 text-xs text-muted-foreground">PDF, images, Word, ZIP & RAR · 20 MB per upload</p>
             <p className="mt-2 text-[11px] text-muted-foreground">Archives: up to 30 files / 60 MB unpacked. No encrypted or nested archives.</p>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">{(["second", "first", "witness"] as const).map((role) => <button key={role} type="button" disabled={Boolean(busy)} onClick={() => setUploadRole(role)} className="group flex items-center gap-4 rounded-xl border border-border bg-card p-5 text-left transition hover:border-primary/35 hover:shadow-sm"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/5 text-primary">{role === "witness" ? <Users className="size-5" /> : <UserRound className="size-5" />}</span><span className="flex-1"><span className="block text-sm font-semibold text-primary">{role === "witness" ? "Witnesses" : roles[role].en.split(" (")[0]}</span><span className="mt-1 block text-xs text-muted-foreground">Upload documents or add manually</span></span><Plus className="size-4 text-muted-foreground group-hover:text-primary" /></button>)}</div>
+          <div data-tour="party-uploads" className="mt-4 grid gap-3 sm:grid-cols-3">{(["second", "first", "witness"] as const).map((role) => <button key={role} type="button" disabled={Boolean(busy)} onClick={() => setUploadRole(role)} className="group flex items-center gap-4 rounded-xl border border-border bg-card p-5 text-left transition hover:border-primary/35 hover:shadow-sm"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/5 text-primary">{role === "witness" ? <Users className="size-5" /> : <UserRound className="size-5" />}</span><span className="flex-1"><span className="block text-sm font-semibold text-primary">{role === "witness" ? "Witnesses" : roles[role].en.split(" (")[0]}</span><span className="mt-1 block text-xs text-muted-foreground">Upload documents or add manually</span></span><Plus className="size-4 text-muted-foreground group-hover:text-primary" /></button>)}</div>
         </section>
 
-        <section className="rounded-xl border border-border bg-card" aria-labelledby="source-heading">
+        <section data-tour="prior-text" className="rounded-xl border border-border bg-card" aria-labelledby="source-heading">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><h2 id="source-heading" className="font-medium text-primary">Prior Title Deeds</h2><p className="mt-1 text-xs text-muted-foreground">Old document text, alongside the details it provides.</p></div>
             <select aria-label="Read source document" className="max-w-64 rounded-lg border border-border bg-background p-2 text-xs" value={sourceLoading || source?.id || ""} disabled={Boolean(sourceLoading)} onChange={(event) => { if (event.target.value) void showSource(event.target.value); }}>
               <option value="">Read a paper…</option>{[...priorDocuments, ...documents.filter((doc) => !priorDocuments.includes(doc))].map((doc) => <option value={doc.id} key={doc.id}>{doc.file_name}</option>)}
@@ -228,12 +229,12 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
           </div> : <p className="px-5 py-12 text-center text-sm text-muted-foreground">{documents.length ? "Choose a paper above to read its extracted text." : "Upload a prior deed to read its text here. You can also enter the details below without uploading."}</p>}
         </section>
 
-        <fieldset disabled={Boolean(busy) || extracting > 0} className="min-w-0">
+        <fieldset data-tour="party-details" disabled={Boolean(busy) || extracting > 0} className="min-w-0">
           <PartiesSection compact deedType={deed.deed_type} parties={data.parties} save={save} documentNames={Object.fromEntries(documents.map((doc) => [doc.id, doc.file_name]))} />
         </fieldset>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="mr-1 text-muted-foreground">Optional sections</span>
+        <div data-tour="optional-details" className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="mr-1 text-muted-foreground">Optional sections<HelpTip text="Naksha means a property map. Consideration means the agreed payment or price. Show these sections when relevant. Hiding them does not delete entered facts." /></span>
           {(["naksha", "consideration"] as const).map((module) => <button key={module} type="button" disabled={Boolean(busy)} aria-pressed={data.workspace.modules[module]} onClick={() => toggle(module)} className={cn("flex items-center gap-1.5 rounded-full border px-3 py-2", data.workspace.modules[module] ? "border-primary/30 bg-primary/5 text-primary" : "border-border text-muted-foreground hover:text-primary")}>{data.workspace.modules[module] ? <Check className="size-3" /> : <Plus className="size-3" />}{module === "naksha" ? "Naksha / map" : "Consideration amount"}</button>)}
           <button type="button" aria-expanded={details} className="ml-auto py-2 text-muted-foreground hover:text-primary" onClick={() => setDetails(!details)}>{details ? "Hide" : "Review"} property & other details</button>
         </div>
@@ -251,13 +252,13 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
           {template && data.custom ? <CustomDetailsForm deedId={deed.id} entry={template} custom={data.custom} onSaved={(answers) => acceptData({ ...dataRef.current, custom: { ...dataRef.current.custom!, answers } })} onNext={() => document.getElementById("draft-instructions")?.focus()} /> : null}
         </fieldset> : null}
 
-        <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
-          <label htmlFor="draft-instructions" className="text-sm font-medium text-primary">What should this deed say?</label>
+        <section data-tour="draft-instructions" className="rounded-2xl border border-border bg-card p-4 sm:p-5">
+          <label htmlFor="draft-instructions" className="text-sm font-medium text-primary">What should this deed say?</label><HelpTip text="Use plain language: explain what to add, keep or remove. Check factual details first. Prepare draft saves a new version; it does not replace your old saved drafts." />
           <textarea id="draft-instructions" className={cn(textareaClass, "mt-3 min-h-32 resize-y border-0 bg-transparent p-0 shadow-none focus:ring-0")} maxLength={4000} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="For example: Retain the title history. Add that possession passes at registration. Remove the arbitration clause. The seller will clear all pending bills." />
           <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-4">
             <label className="text-xs text-muted-foreground">Draft in <select aria-label="Draft language" className="ml-1 rounded-lg border border-border bg-background p-2 text-foreground" value={language} disabled={Boolean(busy)} onChange={(event) => setLanguage(event.target.value as "hindi" | "english")}><option value="hindi">हिंदी</option><option value="english">English</option></select></label>
             <button type="button" disabled={Boolean(busy) || instructions === savedInstructions} className="text-xs text-muted-foreground hover:text-primary disabled:opacity-50" onClick={() => void guarded("Saving instructions…", async () => { const result = await updateRemarks({ id: deed.id, remarks: instructions }); if (result.error) throw new Error(result.error); setSavedInstructions(instructions); toast.success("Instructions saved."); })}>{instructions === savedInstructions ? "Instructions saved" : "Save instructions"}</button>
-            <Button className="ml-auto h-10" disabled={Boolean(busy) || uploads.active || extracting > 0} onClick={generate} type="button">{draftStage ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}{drafts.length ? "Prepare new version" : "Prepare draft"}</Button>
+            <Button data-tour="prepare-draft" className="ml-auto h-10" disabled={Boolean(busy) || uploads.active || extracting > 0} onClick={generate} type="button">{draftStage ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}{drafts.length ? "Prepare new version" : "Prepare draft"}</Button>
           </div>
           <p className="mt-3 text-[11px] leading-5 text-muted-foreground">AI-generated details and clauses require your review. Missing facts remain blank. Every generated draft is saved as a new version.</p>
         </section>
