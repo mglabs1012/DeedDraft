@@ -10,7 +10,10 @@ import { normaliseClauses, normaliseExtraction, normaliseParty, normalisePropert
 import { clausePrompt, extractionPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "../lib/ai/prompts";
 import { deedTypeOrder, deedTypes } from "../lib/deed-types";
 import { buildDraft, buildDraftDocuments, draftChoices, generateEditable, getReadiness, rentSchedule } from "../lib/drafting";
+import { blockTexts, coveredTopics, repeatedTopics, topics } from "../lib/drafting/boilerplate";
+import { clauseChecks } from "../lib/drafting/checks";
 import { clauseLibrary } from "../lib/drafting/clause-library";
+import { dedupeBlocks, dedupeEditable, isSameClause } from "../lib/drafting/dedupe";
 import { applyOperations, draftForAi, editableDraftSchema, markupToHtml, validOperations } from "../lib/drafting/editable";
 import { areaTriple, hindiTerm, moneyHi } from "../lib/drafting/format";
 import { hindiLongDate, hindiWords, termEndDate } from "../lib/drafting/hindi";
@@ -25,7 +28,7 @@ import { formFields, formFor, labelledAnswers } from "../lib/templates/forms";
 import { customDraftHtml, textToParagraphs } from "../lib/templates/render";
 
 import { createRedactor } from "../lib/ai/redact";
-import { renderDraftHtml } from "../lib/drafting/blocks";
+import { html, renderDraftHtml } from "../lib/drafting/blocks";
 import { convertText, localizeData, needsConversion, pendingConversions } from "../lib/drafting/localize";
 import { applyEdits, blockSegments, hashSegments, keepsParticulars } from "../lib/drafting/segments";
 import { isValidAadhaar, verhoeffDigit } from "../lib/text/aadhaar";
@@ -460,7 +463,7 @@ test("Clause library covers every deed type in both languages", () => {
 test("Final check: minors, PAN, TDS, Will witnesses, payments and dates", () => {
   const today = new Date("2026-10-12T10:00:00");
   const adult = (id: string, role: Party["role"], extra: Partial<Party> = {}) => ({ id, role, fullName: "Person " + id, relation: "S/o", relativeName: "R " + id, age: 40, ...extra });
-  const base = { parties: [adult("s", "first", { pan: "ABCDE1234F" }), adult("b", "second", { pan: "BCDEA2345G" }), adult("w1", "witness"), adult("w2", "witness")], properties: [{ id: "p", kind: "plot", description: "plot", areaUnit: "sq_yd", area: 100 }], consideration: { total: 450000 }, payments: [{ id: "x", mode: "cash", amount: 450000 }], execution: { date: "2026-10-10" } };
+  const base = { parties: [adult("s", "first", { pan: "ABCDE1234F" }), adult("b", "second", { pan: "BCDEA2345G" }), adult("w1", "witness"), adult("w2", "witness")], properties: [{ id: "p", kind: "plot", description: "plot", identifier: "39", areaUnit: "sq_yd", area: 100, east: "road", west: "plot 38", north: "plot 40", south: "lane" }], consideration: { total: 450000 }, payments: [{ id: "x", mode: "cash", amount: 450000 }], execution: { date: "2026-10-10" } };
   assert.deepEqual(finalChecks("sale", parseDeedData(base), "", today), [], "a clean sale has no findings");
 
   const ids = (type: Parameters<typeof finalChecks>[0], patch: object, text = "") => finalChecks(type, parseDeedData({ ...base, ...patch }), text, today).map((check) => check.severity + ":" + check.id);
@@ -514,6 +517,78 @@ test("Production safety: rate window, safe redirects, friendly database errors",
     assert.equal(userMessage(null, "Fallback"), "Fallback");
   } finally {
     console.error = quiet;
+  }
+});
+
+test("Boilerplate: every applicable standard clause is present exactly once", () => {
+  const expected: Record<string, string[]> = {
+    sale: ["competency", "encumbrances", "possession", "dues", "originals", "indemnity", "further_assurance", "costs", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    agreement_to_sell: ["competency", "encumbrances", "dues", "originals", "indemnity", "further_assurance", "costs", "notice", "force_majeure", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    gift: ["competency", "encumbrances", "possession", "consideration", "dues", "originals", "indemnity", "further_assurance", "costs", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    release: ["competency", "encumbrances", "possession", "dues", "originals", "indemnity", "further_assurance", "costs", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    partition: ["competency", "encumbrances", "possession", "dues", "originals", "indemnity", "further_assurance", "costs", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    will: ["severability"],
+    lease: ["competency", "encumbrances", "possession", "dues", "indemnity", "costs", "notice", "force_majeure", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    rent: ["competency", "encumbrances", "possession", "dues", "indemnity", "costs", "notice", "force_majeure", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+    other: ["competency", "encumbrances", "consideration", "dues", "indemnity", "further_assurance", "costs", "notice", "force_majeure", "dispute", "jurisdiction", "waiver", "entire_agreement", "binding", "severability"],
+  };
+  for (const type of deedTypeOrder) {
+    for (const language of deedTypes[type].languages) {
+      const [doc] = buildDraft({ type, title: "T", referenceNo: "R", data: sample, firmName: "F", firmCity: "Ajmer" }, language).documents;
+      const texts = blockTexts(doc.blocks);
+      const covered = coveredTopics(texts);
+      for (const id of expected[type]) assert.ok(covered.has(id as never), type + " " + language + " covers " + id);
+      assert.deepEqual(repeatedTopics(texts), [], type + " " + language + " states each topic once");
+      assert.equal(dedupeBlocks(doc.blocks).removed.length, 0, type + " " + language + " has no repeated clause");
+    }
+  }
+});
+
+test("Boilerplate: user's own clause on a topic is not duplicated", () => {
+  const input = (clauses: string) => ({ type: "sale" as const, title: "T", referenceNo: "R", data: { ...sample, terms: { ...sample.terms, additionalClauses: clauses } }, firmName: "F", firmCity: "Ajmer" });
+  const own = "यह कि इस विक्रय पत्र से सम्बन्धित विवादों पर केवल जयपुर न्यायालयों का क्षेत्राधिकार होगा।";
+  const texts = blockTexts(buildDraft(input(own), "hindi").documents[0].blocks);
+  assert.equal(texts.filter((text) => /क्षेत्राधिकार/.test(text)).length, 1, "only the user's jurisdiction clause");
+  assert.ok(texts.includes(own));
+  // The same clause typed twice is printed once.
+  const twice = blockTexts(buildDraft(input("यह कि क्रेता बिजली कनेक्शन अपने नाम करवा लेगा।\nयह कि क्रेता बिजली कनेक्शन अपने नाम करवा लेगा।"), "hindi").documents[0].blocks);
+  assert.equal(twice.filter((text) => text.includes("बिजली कनेक्शन")).length, 1);
+  // English drafts numbered by hand keep a continuous sequence.
+  const english = blockTexts(buildDraft(input("That the Buyer may fence the plot."), "english").documents[0].blocks).filter((text) => /^\d+\. /.test(text)).map((text) => Number(text.split(".")[0]));
+  assert.deepEqual(english, english.map((_, index) => index + 1));
+});
+
+test("Boilerplate: symbolic possession attorns the tenant and drops 'vacant'", () => {
+  const data = { ...sample, terms: { ...sample.terms, possession: "symbolic" as const } };
+  for (const language of ["hindi", "english"] as const) {
+    const texts = blockTexts(buildDraft({ type: "sale", title: "T", referenceNo: "R", data, firmName: "F", firmCity: "Ajmer" }, language).documents[0].blocks).join("\n");
+    assert.ok(language === "hindi" ? texts.includes("सांकेतिक") && !texts.includes("खाली कब्जा") : texts.includes("symbolic possession") && !texts.includes("vacant"), language);
+    assert.ok(coveredTopics([texts]).has("attornment"), language + " attornment");
+  }
+});
+
+test("Repetition check: near-duplicates, numbers and editable drafts", () => {
+  assert.ok(isSameClause("7. That the Seller shall pay all dues up to today.", "That the **Seller** shall pay all dues up to today"));
+  assert.ok(!isSameClause("That plot No. 39 is bounded by the road on the east side of the colony.", "That plot No. 40 is bounded by the road on the east side of the colony."));
+  const draft = { language: "hindi" as const, blocks: [
+    { id: "a", kind: "clause" as const, text: "यह कि किरायेदार प्रत्येक माह की 7 तारीख तक किराया अदा करेगा।" },
+    { id: "b", kind: "clause" as const, text: "यह कि किरायेदार प्रत्येक माह की 7 तारीख तक किराया अदा करेगा।" },
+    { id: "c", kind: "detail" as const, text: "उक्त वर्णित भूखण्ड कार्नर नहीं है।" },
+    { id: "d", kind: "detail" as const, text: "उक्त वर्णित भूखण्ड कार्नर नहीं है।" },
+  ] };
+  const result = dedupeEditable(draft);
+  assert.deepEqual(result.draft.blocks.map((block) => block.id), ["a", "c", "d"], "schedule details may repeat per property");
+  const doc = { language: "english" as const, blocks: [{ t: "clauses" as const, items: [html`That courts at Ajmer alone shall have jurisdiction.`, html`That courts at Jaipur shall have exclusive jurisdiction over disputes.`] }] };
+  assert.equal(clauseChecks([doc]).filter((check) => check.id.startsWith("repeat-")).length, 1, "two jurisdiction clauses are flagged");
+});
+
+test("Clause library never offers a standard clause the draft adds itself", () => {
+  const automatic = new Set(topics.map((topic) => topic.id));
+  for (const type of deedTypeOrder) {
+    for (const clause of clauseLibrary(type)) {
+      const overlap = [...coveredTopics([clause.hindi, clause.english])].filter((id) => automatic.has(id) && !["dues", "possession", "encumbrances", "consideration"].includes(id));
+      assert.deepEqual(overlap, [], clause.id);
+    }
   }
 });
 

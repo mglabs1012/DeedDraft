@@ -7,6 +7,7 @@ import { saveDraftVersion, type SavedDraft } from "@/app/actions/drafts";
 import { draftFromTemplate } from "@/app/actions/templates";
 import { isAiConfigured } from "@/lib/ai/claude";
 import { generateEditable } from "@/lib/drafting";
+import { dedupeEditable } from "@/lib/drafting/dedupe";
 import { applyOperations, type EditableDraft } from "@/lib/drafting/editable";
 import { parseDeedData } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
@@ -57,6 +58,10 @@ export async function generateStandardDraft(input: unknown): Promise<{ error?: s
       if (result.error !== undefined) return { error: "AI drafting did not finish: " + result.error + " Your documents and details are saved." };
       draft = applyOperations(draft, result.operations);
       notes.push(result.reply);
+      // Never save a draft with the same clause twice (the AI may re-add one the template has).
+      const unique = dedupeEditable(draft);
+      draft = unique.draft;
+      if (unique.removed.length) notes.push(unique.removed.length + " repeated clause" + (unique.removed.length === 1 ? " was" : "s were") + " removed from the AI draft.");
     } else if (parsed.data.instructions) {
       notes.push("AI is not configured. This is the standard template draft; your instructions are saved but have not been applied.");
     }
