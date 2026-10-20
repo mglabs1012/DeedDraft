@@ -81,6 +81,8 @@ Write the finished document:
 - Fill every blank (__________) with the matching answer. Where no answer was given, keep a blank "__________" so it can be filled by hand. Never invent names, numbers, dates, amounts or addresses.
 - Write amounts as "₹ 1,50,000/- (Rupees One Lakh Fifty Thousand only)" and dates as "5 October 2026".
 - Fold the person's notes into the right clauses in formal language.
+- Include the standard clauses this kind of document needs, once each and only if the template does not already have them: severability, entire agreement, binding effect on heirs and assigns, waiver and amendments in writing, indemnity, dispute resolution with governing law (laws of India), jurisdiction, further assurances, notices, costs/stamp duty and, for agreements and leases, force majeure. For property transfers also: legal competency of the executant, freedom from encumbrances, nature of possession delivered (physical/vacant or symbolic), consideration and receipt (or natural love and affection for a gift), statutory dues up to the date of execution, and handover of original title documents.
+- Before replying, check that no clause or topic is repeated anywhere in the document.
 ${usFormat ? "- The template follows a US format. Adapt it to Indian practice: rupees instead of dollars, Indian addresses, Indian laws (e.g. Indian Contract Act 1872, Transfer of Property Act 1882, Registration Act 1908) instead of US laws, notary or witnesses instead of county or state wording. Do not cite a section number unless it is in the template.\n" : ""}- ${language === "hindi" ? "Write the whole document in formal Hindi (Devanagari) as used in Indian legal documents. Keep names and addresses as given." : "Write in clear, formal Indian English."}
 - End with signature lines for the parties and the witnesses given.
 
@@ -126,6 +128,7 @@ Strict rules:
 - Lines marked [fixed] (boundary schedule, tables, signature blocks) are already in the deed. Never add another copy of them, and never add blank boundary tables or signature lines.
 - Never copy names, numbers or facts from the reference drafts.
 - Do not touch segments that are already right. Prefer few, meaningful edits (at most about 15).
+- Never repeat a clause or a topic. The draft already contains standard clauses (competency, encumbrances, possession, consideration/receipt, statutory dues, original documents, indemnity, further assurance, stamp duty and costs, governing law and dispute resolution, jurisdiction, notices, force majeure, waiver and amendments, entire agreement, binding effect, severability) wherever they apply: improve one in place with "replace", never insert a second clause on the same subject.
 
 Return edits only: "replace" a segment's full text, "insert_after" a segment with a new paragraph, or "delete" a segment. Use the segment numbers shown. Add up to 8 short "notes" in plain English for a non-lawyer, describing each change in words (e.g. "Added the electricity-bill clause you asked for") — never mention segment numbers.`;
 }
@@ -193,7 +196,8 @@ When the advocate asks for a change, return precise edit operations on block ids
 - {"op":"replace","id":"b12","text":"full new text of that block"}
 - {"op":"insert_after","id":"b12","kind":"clause|para|detail|heading","text":"new block text"}
 - {"op":"delete","id":"b12"}
-Keep the deed's language, style and party terms; change only what was asked; keep **bold** markers around party names if present. Never invent names, amounts, dates or registration numbers — use "............" if a detail is missing, and say so.
+Keep the deed's language, style and party terms; change only what was asked; keep **bold** markers around party names if present.
+Before inserting a clause, check that no block already covers the same subject (indemnity, jurisdiction, severability, possession, dues …); if one does, "replace" that block instead. A clause must never appear twice. Never invent names, amounts, dates or registration numbers — use "............" if a detail is missing, and say so.
 If the request is a question or needs no edit, answer and return no operations.
 Return JSON: { "reply": "short explanation in the advocate's language", "operations": [] }
 

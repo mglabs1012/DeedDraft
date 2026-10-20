@@ -8,6 +8,7 @@ import {
   signUpSchema,
   updatePasswordSchema,
 } from "@/lib/schemas/auth";
+import { site } from "@/lib/legal/site";
 import { onboardingSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 
@@ -34,6 +35,8 @@ export async function signUp(input: unknown): Promise<ActionResult> {
     password: parsed.data.password,
     options: {
       emailRedirectTo: origin + "/auth/confirm?next=/onboarding",
+      // Record of consent (DPDP Act): when, and to which version of the policies.
+      data: { terms_accepted_at: new Date().toISOString(), terms_version: site.version },
     },
   });
 

@@ -12,7 +12,7 @@ import { Field, inputClass, textareaClass } from "@/components/ui/field";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
 import { formatINR, type DeedLanguage } from "@/lib/deeds";
 import { rentSchedule } from "@/lib/drafting";
-import { clauseLibrary } from "@/lib/drafting/clause-library";
+import { clauseLibrary, type LibraryClause } from "@/lib/drafting/clause-library";
 import { englishLongDate, shortDate, termEndDate } from "@/lib/drafting/hindi";
 import { executionSchema, termsSchema, type Execution, type Terms } from "@/lib/schemas/deed-data";
 
@@ -187,6 +187,29 @@ function TermsCard({ deedType, terms, save, aiEnabled, deedId, deedLanguage = "h
         </>
       ) : null}
 
+      {kind !== "tenancy" && deedType !== "will" ? (
+        <FormGroup description="used in the standard clauses" title={deedType === "sale" || deedType === "gift" || deedType === "release" ? "Possession & disputes" : "Disputes"}>
+          {deedType === "sale" || deedType === "gift" || deedType === "release" ? (
+            <Field className="sm:col-span-2" hint="symbolic when a tenant occupies the property" label="Possession handed over">
+              <select className={inputClass} {...form.register("possession")}>
+                <option value="vacant">Physical, vacant & peaceful possession</option>
+                <option value="symbolic">Symbolic possession (property is tenanted)</option>
+              </select>
+            </Field>
+          ) : null}
+          <Field hint="city; defaults to place of execution" label="Courts having jurisdiction">
+            <input className={inputClass} placeholder="e.g. अजमेर" {...form.register("jurisdiction")} />
+          </Field>
+          <div className="self-end">
+            <CheckboxField hint="Arbitration and Conciliation Act, 1996" label="Arbitration if mediation fails" {...form.register("arbitration")} />
+          </div>
+        </FormGroup>
+      ) : null}
+
+      <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+        Standard clauses (competency, encumbrances, indemnity, dues, original documents, further assurance, stamp duty, governing law, jurisdiction, waiver, entire agreement, binding effect, severability) are added to the draft automatically when it does not already cover them. No clause is repeated.
+      </p>
+
       <Field hint="one clause per line; added before the schedule" label="Additional clauses">
         <textarea className={textareaClass + " min-h-28"} placeholder="यह कि ..." {...form.register("additionalClauses")} />
       </Field>
@@ -216,19 +239,20 @@ function TermsCard({ deedType, terms, save, aiEnabled, deedId, deedLanguage = "h
 
 /** Ready-made optional clauses for the deed type, drawn from registered precedents. */
 function ClauseLibrary({ deedType, deedLanguage, current, onAdd }: { deedType: DeedType; deedLanguage: DeedLanguage; current: string; onAdd: (clause: string) => void }) {
-  const clauses = clauseLibrary(deedType);
   const languages: ("hindi" | "english")[] = deedLanguage === "bilingual" ? ["hindi", "english"] : [deedLanguage];
+  const offered = (clause: LibraryClause) => languages.filter((language) => !clause.languages || clause.languages.includes(language));
+  const clauses = clauseLibrary(deedType).filter((clause) => offered(clause).length);
   if (!clauses.length) return null;
   return (
     <details className="group rounded-lg border border-border bg-muted/30">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-semibold text-primary">
-        <BookOpen className="size-4" /> Clause library <span className="font-normal text-muted-foreground">· {clauses.length} standard clauses</span>
+        <BookOpen className="size-4" /> Clause library <span className="font-normal text-muted-foreground">· {clauses.length} optional clauses</span>
       </summary>
       <ul className="divide-y divide-border border-t border-border">
         {clauses.map((clause) => (
           <li className="space-y-2 px-3 py-3" key={clause.id}>
             <p className="text-sm font-semibold text-primary">{clause.title}</p>
-            {languages.map((language) => {
+            {offered(clause).map((language) => {
               const text = clause[language];
               const added = current.includes(text);
               return (

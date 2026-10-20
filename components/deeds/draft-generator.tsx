@@ -15,7 +15,8 @@ import { getDeedType, type DeedType, type DraftLanguage, type SectionId } from "
 import type { DeedLanguage, DeedStatus } from "@/lib/deeds";
 import { buildDraftDocuments, defaultDraftChoice, draftChoices, type DraftChoice, type DraftDocument, type ReadinessItem } from "@/lib/drafting";
 import { renderDraftHtml } from "@/lib/drafting/blocks";
-import { finalChecks, htmlToText } from "@/lib/drafting/checks";
+import { clauseChecks, finalChecks, htmlToText } from "@/lib/drafting/checks";
+import { dedupeBlocks } from "@/lib/drafting/dedupe";
 import { editableDraftSchema, fromEditable, toEditable, type EditableDraft } from "@/lib/drafting/editable";
 import { pendingConversions, usedConversions } from "@/lib/drafting/localize";
 import { applyEdits, blockSegments, hashSegments } from "@/lib/drafting/segments";
@@ -91,7 +92,17 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
   }, [savedDrafts]);
   const editedNote = Object.entries(latest).map(([key, value]) => (key === "hindi" ? "हिंदी" : "English") + " v" + value!.version).join(", ");
   const generated = useMemo(() => standard.map((doc, index) => (view === "ai" && refined[index].state === "fresh" ? refined[index].doc! : doc)), [standard, refined, view]);
-  const shown = useMemo(() => generated.map((doc) => (useEdited && latest[doc.language] ? fromEditable(latest[doc.language]!.draft) : doc)), [generated, latest, useEdited]);
+  // Final no-repetition pass over what is previewed and exported (AI edits and saved versions included).
+  const { shown, removed } = useMemo(() => {
+    const removedByLang: Partial<Record<DraftLanguage, string[]>> = {};
+    const docs = generated.map((doc) => {
+      const base = useEdited && latest[doc.language] ? fromEditable(latest[doc.language]!.draft) : doc;
+      const result = dedupeBlocks(base.blocks);
+      if (result.removed.length) removedByLang[doc.language] = result.removed;
+      return { ...base, blocks: result.blocks };
+    });
+    return { shown: docs, removed: removedByLang };
+  }, [generated, latest, useEdited]);
   // The studio starts from what is being previewed (AI refined when fresh, otherwise standard).
   const generators = useMemo(
     () =>
@@ -108,7 +119,7 @@ export function DraftGenerator({ aiEnabled, deedId, type, title, referenceNo, la
     [type, title, referenceNo, data, firmName, city],
   );
   const html = useMemo(() => renderDraftHtml({ title: referenceNo + " · " + title, documents: shown, footer: "Ref. " + referenceNo + " · Drafted by " + firmName + ", " + city }), [shown, referenceNo, title, firmName, city]);
-  const checks = useMemo(() => finalChecks(type, data, htmlToText(html)), [type, data, html]);
+  const checks = useMemo(() => [...finalChecks(type, data, htmlToText(html)), ...clauseChecks(shown, removed)], [type, data, html, shown, removed]);
   const blocking = checks.filter((check) => check.severity === "error");
 
   // Automatic Hindi ⇄ English conversion of typed names and addresses for the chosen draft language.

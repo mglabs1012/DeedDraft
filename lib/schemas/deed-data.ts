@@ -221,6 +221,8 @@ export const termsSchema = z.object({
   propertyTaxBy: z.enum(["tenant", "owner"]).default("owner"),
   jurisdiction: text(80),
   arbitration: z.boolean().default(false),
+  // conveyances: "vacant" physical possession, or "symbolic" when a tenant occupies the property
+  possession: z.enum(["vacant", "symbolic"]).default("vacant"),
   // every deed
   additionalClauses: text(6000),
 });
