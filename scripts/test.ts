@@ -13,6 +13,7 @@ import { buildDraft, buildDraftDocuments, draftChoices, generateEditable, getRea
 import { blockTexts, coveredTopics, repeatedTopics, topics } from "../lib/drafting/boilerplate";
 import { clauseChecks } from "../lib/drafting/checks";
 import { clauseLibrary } from "../lib/drafting/clause-library";
+import { footerGroups, legalDocs } from "../lib/legal";
 import { dedupeBlocks, dedupeEditable, isSameClause } from "../lib/drafting/dedupe";
 import { applyOperations, draftForAi, editableDraftSchema, markupToHtml, validOperations } from "../lib/drafting/editable";
 import { areaTriple, hindiTerm, moneyHi } from "../lib/drafting/format";
@@ -590,6 +591,23 @@ test("Clause library never offers a standard clause the draft adds itself", () =
       assert.deepEqual(overlap, [], clause.id);
     }
   }
+});
+
+test("Legal pages: consent, no guarantee and Ajmer-only jurisdiction on every page", () => {
+  const docs = Object.values(legalDocs);
+  assert.equal(new Set(docs.map((doc) => doc.slug)).size, docs.length, "unique slugs");
+  for (const doc of docs) {
+    const ids = doc.sections.map((section) => section.id);
+    assert.equal(new Set(ids).size, ids.length, doc.slug + " unique section ids");
+    assert.ok(ids.includes("jurisdiction"), doc.slug + " jurisdiction");
+    assert.ok(ids.includes("no-guarantee"), doc.slug + " no guarantee");
+    const text = JSON.stringify(doc.sections);
+    assert.ok(text.includes("consent of the person"), doc.slug + " consent for uploaded documents");
+    assert.ok(!/courts? (?:at|of|in) (?!Ajmer)[A-Z][a-z]+/.test(text), doc.slug + " names no court outside Ajmer");
+  }
+  const linked = new Set(footerGroups.flatMap((group) => group.links.map((link) => link.href.slice(1))));
+  for (const doc of docs) assert.ok(linked.has(doc.slug), doc.slug + " is linked from the footer");
+  assert.ok(JSON.stringify(legalDocs.dataProtection).includes("Digital Personal Data Protection Act, 2023"));
 });
 
 console.log("\n" + passed + " checks passed.");

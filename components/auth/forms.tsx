@@ -97,7 +97,7 @@ export function SignUpForm() {
   const [message, setMessage] = useState<string>();
   const form = useForm({
     resolver: zodResolver(signUpSchema),
-    defaultValues: { email: "", password: "", confirmPassword: "" },
+    defaultValues: { email: "", password: "", confirmPassword: "", acceptTerms: false },
   });
 
   const submit = form.handleSubmit((values) => {
@@ -128,6 +128,17 @@ export function SignUpForm() {
         Confirm password
         <input className={inputClass} type="password" autoComplete="new-password" {...form.register("confirmPassword")} />
         <span className="text-xs font-normal text-destructive">{form.formState.errors.confirmPassword?.message}</span>
+      </label>
+      <label className="flex items-start gap-3 text-sm leading-6 text-muted-foreground">
+        <input className="mt-1 size-4 shrink-0 accent-primary" type="checkbox" {...form.register("acceptTerms")} />
+        <span>
+          I agree to the{" "}
+          <Link className="font-medium text-primary hover:underline" href="/terms" target="_blank">Terms of Service</Link>,{" "}
+          <Link className="font-medium text-primary hover:underline" href="/privacy" target="_blank">Privacy Policy</Link>,{" "}
+          <Link className="font-medium text-primary hover:underline" href="/data-protection" target="_blank">Data Protection Policy</Link> and{" "}
+          <Link className="font-medium text-primary hover:underline" href="/disclaimer" target="_blank">Disclaimer</Link>, and I will upload documents only with the consent of the persons they belong to.
+          <span className="block text-xs font-normal text-destructive">{form.formState.errors.acceptTerms?.message}</span>
+        </span>
       </label>
       <Button className="h-11 w-full" disabled={pending} type="submit">
         <PendingIcon pending={pending} /> Create account

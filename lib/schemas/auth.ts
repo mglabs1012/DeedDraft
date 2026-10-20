@@ -19,6 +19,7 @@ export const signInSchema = z.object({
 export const signUpSchema = signInSchema
   .extend({
     confirmPassword: passwordSchema,
+    acceptTerms: z.boolean().refine((value) => value, "Please accept the Terms of Service, Privacy Policy and Disclaimer to continue."),
   })
   .refine((value) => value.password === value.confirmPassword, {
     path: ["confirmPassword"],
