@@ -304,6 +304,12 @@ function lenientArray<T extends z.ZodTypeAny>(schema: T, max: number) {
 const emptyTerms = termsSchema.parse({});
 const emptyExecution = executionSchema.parse({});
 
+export const standardWorkspaceSchema = z.object({
+  mode: z.literal("standard").default("standard"),
+  modules: z.object({ naksha: z.boolean().default(false), consideration: z.boolean().default(false) }).default({}),
+  processedDocuments: z.array(z.string().uuid()).max(500).default([]),
+});
+
 export const deedDataSchema = z.object({
   version: z.number().int().optional(),
   parties: lenientArray(partySchema, 50),
@@ -317,6 +323,7 @@ export const deedDataSchema = z.object({
   localized: localizedSchema.catch({ hindi: {}, english: {} }),
   aiDraft: aiDraftSchema.catch({}),
   chat: lenientArray(chatMessageSchema, 60),
+  workspace: standardWorkspaceSchema.catch(standardWorkspaceSchema.parse({})),
 });
 
 export const sectionSchemas = {
@@ -363,7 +370,7 @@ export type CustomDraft = z.infer<typeof customDraftSchema>;
 export type PartyRole = z.infer<typeof partyRoleSchema>;
 
 export function emptyDeedData(): DeedData {
-  return { version: DEED_DATA_VERSION, parties: [], properties: [], titleChain: [], consideration: {}, payments: [], terms: emptyTerms, execution: emptyExecution, localized: { hindi: {}, english: {} }, aiDraft: {}, chat: [] };
+  return { version: DEED_DATA_VERSION, parties: [], properties: [], titleChain: [], consideration: {}, payments: [], terms: emptyTerms, execution: emptyExecution, localized: { hindi: {}, english: {} }, aiDraft: {}, chat: [], workspace: standardWorkspaceSchema.parse({}) };
 }
 
 export function parseDeedData(value: unknown): DeedData {

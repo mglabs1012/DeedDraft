@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Bot, Check, History, Lock, LoaderCircle, MessageSquare, Plus, RotateCcw, Save, Send, ShieldCheck, Trash2, X } from "lucide-react";
+import { Bot, Check, FileDown, History, Lock, LoaderCircle, MessageSquare, Plus, Printer, RotateCcw, Save, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { chatEditDraft, reviewDraftText } from "@/app/actions/ai";
@@ -9,8 +9,8 @@ import { saveDraftVersion, type SavedDraft } from "@/app/actions/drafts";
 import { Button } from "@/components/ui/button";
 import type { ReviewIssue } from "@/lib/ai/parse";
 import type { DraftLanguage } from "@/lib/deed-types";
-import { renderBlock } from "@/lib/drafting/blocks";
-import { applyOperations, type EditableBlock, type EditableDraft, type EditOperation, type TextKind } from "@/lib/drafting/editable";
+import { renderBlock, renderDraftHtml } from "@/lib/drafting/blocks";
+import { applyOperations, fromEditable, type EditableBlock, type EditableDraft, type EditOperation, type TextKind } from "@/lib/drafting/editable";
 import { cn } from "@/lib/utils";
 
 type ChatTurn =
@@ -54,6 +54,7 @@ export function DraftStudio({
   saved,
   aiEnabled,
   onSaved,
+  exportTitle,
 }: {
   deedId: string;
   languages: DraftLanguage[];
@@ -61,6 +62,7 @@ export function DraftStudio({
   saved: SavedDraft[];
   aiEnabled: boolean;
   onSaved: (draft: SavedDraft) => void;
+  exportTitle?: string;
 }) {
   const [language, setLanguage] = useState<DraftLanguage>(languages[0]);
   const versions = useMemo(() => saved.filter((item) => item.language === language).sort((a, b) => b.version - a.version), [saved, language]);
@@ -173,6 +175,20 @@ export function DraftStudio({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
+        {exportTitle ? <>
+          <Button variant="outline" type="button" className="h-9" onClick={() => {
+            const html = renderDraftHtml({ title: exportTitle, documents: [fromEditable(draft)], footer: "Draft for review" });
+            const url = URL.createObjectURL(new Blob(["\ufeff", html], { type: "application/msword" }));
+            const a = document.createElement("a"); a.href = url; a.download = exportTitle.replace(/[<>:"/\\|?*]/g, "-") + ".doc"; a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }}><FileDown className="size-4" /> Word</Button>
+          <Button variant="outline" type="button" className="h-9" onClick={() => {
+            const win = window.open("", "_blank");
+            if (!win) return toast.error("Allow pop-ups to print or save as PDF.");
+            win.document.write(renderDraftHtml({ title: exportTitle, documents: [fromEditable(draft)], footer: "Draft for review" }));
+            win.document.close(); win.focus(); win.setTimeout(() => win.print(), 300);
+          }}><Printer className="size-4" /> Print / PDF</Button>
+        </> : null}
         {languages.length > 1 ? (
           <div className="flex rounded-lg bg-secondary p-1 text-sm font-semibold">
             {languages.map((item) => (

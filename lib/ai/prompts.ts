@@ -13,6 +13,7 @@ export function extractionPrompt(type: DeedType, category: string) {
 
 Party roles in the NEW deed: "first" = ${config.roles.first.en}, "second" = ${config.roles.second.en}, "other" = ${config.roles.other.en}, "witness" = witness.
 If the paper is a PRIOR title document (earlier sale deed, patta, allotment), its buyer/allottee is usually the present owner → role "first" of the new deed, and the paper itself becomes a titleChain entry. Its seller goes into titleChain.from, not into parties.
+Do not carry witnesses from an old deed into the new deed. Only identify a current buyer, seller or witness when the paper explicitly establishes that current role. An identity card alone does not establish a transaction role: use "other" and add a warning asking the user to assign the role.
 
 Return JSON with this shape (omit unknown fields, use [] for empty lists):
 {

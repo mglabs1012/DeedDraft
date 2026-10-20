@@ -16,9 +16,9 @@ export default async function NewDeedPage({
 
   return (
     <div>
-      <p className="text-sm font-semibold tracking-[0.16em] text-accent-foreground uppercase">New document</p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight text-primary sm:text-3xl">Start a new document</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Choose what you need. You&apos;ll fill in the details on the next screens.</p>
+      <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">Standard Mode</p>
+      <h1 className="mt-2 text-2xl font-semibold tracking-tight text-primary sm:text-3xl">Choose your document.</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Pick a template, then upload your papers. You can add or correct details at any time.</p>
       <section className="mt-6 rounded-xl border border-border bg-card p-4 shadow-sm sm:mt-7 sm:p-7">
         <NewDeedForm aiEnabled={isAiConfigured()} initialTemplate={initialTemplate} initialType={initialType} library={libraryIndex} />
       </section>

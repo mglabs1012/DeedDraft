@@ -33,7 +33,7 @@ function openDocument(id: string) {
   });
 }
 
-export function PartiesSection({ deedType, parties, save, ai = null, documentNames = {} }: { deedType: DeedType; parties: Party[]; save: SaveSection; ai?: AiTarget; documentNames?: DocumentNames }) {
+export function PartiesSection({ deedType, parties, save, ai = null, documentNames = {}, compact = false }: { deedType: DeedType; parties: Party[]; save: SaveSection; ai?: AiTarget; documentNames?: DocumentNames; compact?: boolean }) {
   const roles = getDeedType(deedType).roles;
   const editor = useListEditor(parties, (next) => save("parties", next));
   const [defaultRole, setDefaultRole] = useState<PartyRole>("first");
@@ -45,7 +45,7 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
 
   return (
     <section className={cardClass}>
-      <SectionHeader
+      {!compact ? <SectionHeader
         action={
           <div className="flex flex-col gap-2 sm:flex-row">
             {ai ? <Button className="h-9" onClick={() => add("first")} type="button" variant="outline"><Sparkles className="size-4" /> Add from Aadhaar / PAN</Button> : null}
@@ -54,9 +54,9 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
         }
         description={roles.first.en + " (" + roles.first.hi.m + "), " + roles.second.en.toLowerCase() + " (" + roles.second.hi.m + ") and witnesses."}
         title="Parties"
-      />
-      {parties.length ? (
-        <div className="divide-y divide-border">
+      /> : <div className="border-b border-border px-5 py-4"><h2 className="font-medium text-primary">People in this deed</h2><p className="mt-1 text-xs text-muted-foreground">AI fills what it can find. Add anyone missing or edit any detail.</p></div>}
+      {parties.length || compact ? (
+        <div className={compact ? "grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0" : "divide-y divide-border"}>
           {order.map((role) => {
             const group = parties.filter((party) => party.role === role);
             if (role === "other" && !group.length) return null;
@@ -71,7 +71,7 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
                   </button>
                 </div>
                 {group.length ? (
-                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                  <div className={compact ? "mt-3 grid gap-3" : "mt-3 grid gap-3 lg:grid-cols-2"}>
                     {group.map((party) => (
                       <article className="flex gap-3 rounded-lg border border-border p-3 sm:p-4" key={party.id}>
                         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary">

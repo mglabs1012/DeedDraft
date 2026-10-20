@@ -44,6 +44,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  serverExternalPackages: ["node-unrar-js", "heic-decode", "bmp-js", "yauzl"],
   // Template library text is read from disk by server code; include it in the server build.
   outputFileTracingIncludes: { "/app/**": ["./data/template-library/**", "./data/reference-drafts.json"] },
   experimental: {

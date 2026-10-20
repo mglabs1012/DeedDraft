@@ -48,7 +48,11 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
       language: parsed.data.language,
       remarks: parsed.data.remarks || null,
       created_by: workspace.user.id,
-      ...(template ? { data: { ...emptyDeedData(), custom: { templateId: template.id, title: template.title, answers: {}, drafts: {} } } as unknown as Json } : {}),
+      data: {
+        ...emptyDeedData(),
+        execution: { ...emptyDeedData().execution, mapAttached: false },
+        ...(template ? { custom: { templateId: template.id, title: template.title, answers: {}, drafts: {} } } : {}),
+      } as unknown as Json,
     })
     .select("id, reference_no")
     .single();

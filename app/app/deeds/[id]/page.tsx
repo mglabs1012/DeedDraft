@@ -1,51 +1,40 @@
 import { notFound } from "next/navigation";
 
-import type { SavedDraft } from "@/app/actions/drafts";
-import { DeedDetail } from "@/components/deeds/deed-detail";
+import { StandardWorkspace } from "@/components/standard/workspace";
 import { isAiConfigured } from "@/lib/ai/claude";
 import { parseDeedData } from "@/lib/schemas/deed-data";
-import { getLibraryEntry, getTemplateText } from "@/lib/templates/library.server";
+import { getLibraryEntry } from "@/lib/templates/library.server";
 import { getCurrentWorkspace } from "@/lib/workspace";
-import type { Database, Deed } from "@/types/database";
-
-type Document = Database["public"]["Tables"]["deed_documents"]["Row"];
-type Activity = Database["public"]["Tables"]["activity_log"]["Row"];
+import type { Deed } from "@/types/database";
 
 // AI extraction of scanned papers and drafting long templates can take a while.
 export const maxDuration = 300;
 
-export default async function DeedDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string | string[] }> }) {
-  const [{ id }, query] = await Promise.all([params, searchParams]);
+export default async function DeedDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const workspace = await getCurrentWorkspace();
   if (!workspace) return null;
 
-  const [deedResult, documentsResult, activityResult, draftsResult] = await Promise.all([
+  const [deedResult, documentsResult] = await Promise.all([
     workspace.supabase.from("deeds").select("*").eq("id", id).eq("firm_id", workspace.firm.id).maybeSingle(),
-    workspace.supabase.from("deed_documents").select("id, deed_id, firm_id, category, file_name, storage_path, mime_type, size_bytes, uploaded_by, created_at, text_source, text_quality, page_count, processed_at").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }),
-    workspace.supabase.from("activity_log").select("*").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }).limit(30),
-    // Tolerates a database without migration 0004: the studio then starts from the generated draft.
-    workspace.supabase.from("deed_drafts").select("id, language, version, note, created_at, content").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("version", { ascending: false }).limit(20),
+    workspace.supabase.from("deed_documents").select("id, category, file_name, mime_type, size_bytes").eq("deed_id", id).eq("firm_id", workspace.firm.id).order("created_at", { ascending: false }),
   ]);
 
+  if (deedResult.error || documentsResult.error) throw new Error("Could not load this workspace. Please retry.");
   if (!deedResult.data) notFound();
 
   const initialData = parseDeedData(deedResult.data.data);
   const entry = getLibraryEntry(initialData.custom?.templateId);
-  const templateText = entry ? await getTemplateText(entry.id) : null;
 
   return (
-    <DeedDetail
+    <StandardWorkspace
       aiEnabled={isAiConfigured()}
-      activities={(activityResult.data ?? []) as Activity[]}
       deed={deedResult.data as Deed}
-      documents={(documentsResult.data ?? []) as Document[]}
+      initialDocuments={documentsResult.data ?? []}
       firmCity={workspace.firm.city}
-      firmId={workspace.firm.id}
       firmName={workspace.firm.name}
       initialData={initialData}
-      initialDrafts={draftsResult.error ? [] : ((draftsResult.data ?? []) as SavedDraft[])}
-      initialTab={typeof query.tab === "string" ? query.tab : undefined}
-      template={entry && templateText ? { entry, text: templateText } : null}
+      template={entry ?? null}
     />
   );
 }
