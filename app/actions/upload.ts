@@ -2,7 +2,6 @@
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { revalidatePath } from "next/cache";
 import { requireWorkspace } from "@/lib/workspace";
 import { documentCategorySchema } from "@/lib/schemas/documents";
 import { unpackArchive } from "@/lib/uploads/archives";
@@ -114,7 +113,6 @@ export async function finishStandardUpload(input: unknown): Promise<{ error?: st
       if (assigned.error) notices.push(assigned.error);
     }
     // Source containers are retained privately so a processing retry can recover partial success.
-    revalidatePath("/app/deeds/" + ctx.input.deedId);
     return { documents, notices, ...(documents.length < bundle.files.length ? { error: "Some files still need attention. Retry processing to recover them without uploading again." } : {}) };
   } catch (error) { return { error: error instanceof Error ? error.message : "Processing failed. Your uploaded bytes can be retried.", documents, notices }; }
 }

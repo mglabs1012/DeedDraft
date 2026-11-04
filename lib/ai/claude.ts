@@ -223,27 +223,44 @@ function documentName(fileName: string, part?: number) {
   return part ? base + " part " + part : base;
 }
 
-/** Splits a PDF into page ranges that each fit the Converse document limit. */
+/**
+ * Splits a PDF into page ranges that each fit the Converse document limit.
+ * Each page is measured once on its own (a single-page PDF repeats shared fonts,
+ * so the sum over-estimates a range); pages are then grouped greedily and each
+ * range is built once — linear in the page count instead of rebuilding the
+ * growing range for every page.
+ */
 async function splitPdf(bytes: Uint8Array): Promise<Uint8Array[]> {
   const source = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  const chunks: Uint8Array[] = [];
-  let pages: number[] = [];
   const build = async (indices: number[]) => {
     const out = await PDFDocument.create();
     for (const page of await out.copyPages(source, indices)) out.addPage(page);
     return out.save();
   };
+  const sizes: number[] = [];
   for (let index = 0; index < source.getPageCount(); index += 1) {
-    const candidate = await build([...pages, index]);
-    if (candidate.byteLength <= MAX_PDF_BYTES) {
-      pages.push(index);
-      continue;
-    }
-    if (!pages.length) throw new AiError("Page " + (index + 1) + " of this PDF is larger than 4.5 MB. Rescan it at a lower resolution.");
-    chunks.push(await build(pages));
-    pages = [index];
+    const size = (await build([index])).byteLength;
+    if (size > MAX_PDF_BYTES) throw new AiError("Page " + (index + 1) + " of this PDF is larger than 4.5 MB. Rescan it at a lower resolution.");
+    sizes.push(size);
   }
-  if (pages.length) chunks.push(await build(pages));
+  const ranges: number[][] = [];
+  let current: number[] = [];
+  let total = 0;
+  sizes.forEach((size, index) => {
+    if (current.length && total + size > MAX_PDF_BYTES) { ranges.push(current); current = []; total = 0; }
+    current.push(index);
+    total += size;
+  });
+  if (current.length) ranges.push(current);
+  const chunks: Uint8Array[] = [];
+  const emit = async (indices: number[]): Promise<void> => {
+    const chunk = await build(indices);
+    if (chunk.byteLength <= MAX_PDF_BYTES || indices.length === 1) { chunks.push(chunk); return; }
+    const middle = Math.ceil(indices.length / 2);
+    await emit(indices.slice(0, middle));
+    await emit(indices.slice(middle));
+  };
+  for (const range of ranges) await emit(range);
   return chunks;
 }
 

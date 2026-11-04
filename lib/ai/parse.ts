@@ -79,20 +79,36 @@ const unitMap: Record<string, Property["areaUnit"]> = {
 
 const roles = new Set(["first", "second", "other", "witness"]);
 
+/** Salutations read as part of a name ("श्रीमती केसर देवी", "Smt. Kesar Devi"); the draft adds its own. */
+const SALUTATION = /^(?:श्रीमती|सुश्री|श्री|कुमारी|smt\.?|shrimati|shri|sri|mr\.?|mrs\.?|ms\.?|kumari|km\.?)\s+/i;
+const FEMALE_SALUTATION = /^(?:श्रीमती|सुश्री|कुमारी|smt|shrimati|mrs|ms|kumari|km)\b/i;
+/** "स्व. रमेश", "स्वर्गीय रमेश", "Late Ramesh", "Ramesh (deceased)". */
+const DECEASED = /^(?:स्व\.?\s*|स्वर्गीय\s+|late\.?\s+)|\s*\((?:deceased|late|मृतक)\)$/i;
+
+export function stripSalutation(name: string) {
+  let out = name.trim();
+  while (SALUTATION.test(out)) out = out.replace(SALUTATION, "").trim();
+  return out;
+}
+
 export function normaliseParty(raw: Loose): Party | null {
   raw = { ...raw, documentIds: [] };
   const relation = relationMap[str(raw.relation).toLowerCase()] ?? "S/o";
   const genderText = str(raw.gender).toLowerCase();
-  const gender = genderText === "female" || genderText === "f" || genderText === "महिला" || relation === "W/o" || relation === "D/o" ? "female" : "male";
+  const typedName = str(raw.fullName);
+  const gender = genderText === "female" || genderText === "f" || genderText === "महिला" || relation === "W/o" || relation === "D/o" || FEMALE_SALUTATION.test(typedName) ? "female" : "male";
+  const relativeText = stripSalutation(str(raw.relativeName));
+  const relativeDeceased = raw.relativeDeceased === true || DECEASED.test(relativeText);
   const parsed = partySchema.safeParse({
     id: crypto.randomUUID(),
-    role: roles.has(str(raw.role)) ? str(raw.role) : "witness",
-    fullName: str(raw.fullName),
+    // An unknown role must not silently make someone a witness: "other" asks the user to assign it.
+    role: roles.has(str(raw.role)) ? str(raw.role) : "other",
+    fullName: stripSalutation(typedName),
     alias: str(raw.alias),
     gender,
     relation,
-    relativeName: str(raw.relativeName),
-    relativeDeceased: raw.relativeDeceased === true,
+    relativeName: stripSalutation(relativeText.replace(DECEASED, "")),
+    relativeDeceased,
     age: toNumber(raw.age),
     caste: str(raw.caste),
     occupation: str(raw.occupation),

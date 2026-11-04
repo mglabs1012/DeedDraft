@@ -91,7 +91,6 @@ export async function recategorizeDocument(input: unknown): Promise<ActionResult
     details: { file_name: document.file_name, category: parsed.data.category },
   });
 
-  revalidatePath("/app/deeds/" + document.deed_id);
   return {};
 }
 
@@ -170,6 +169,5 @@ export async function deleteDocument(input: unknown): Promise<ActionResult> {
     details: { file_name: document.file_name },
   });
 
-  revalidatePath("/app/deeds/" + document.deed_id);
   return {};
 }

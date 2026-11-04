@@ -36,6 +36,7 @@ import { isValidAadhaar, verhoeffDigit } from "../lib/text/aadhaar";
 
 import { takeSlot } from "../lib/ai/rate-window";
 import { countBlanks, finalChecks, htmlToText } from "../lib/drafting/checks";
+import { convertOffline, isShortValue } from "../lib/drafting/transliterate";
 import { userMessage } from "../lib/errors";
 import { safeNextPath } from "../lib/safe-path";
 
@@ -608,6 +609,46 @@ test("Legal pages: consent, no guarantee and Ajmer-only jurisdiction on every pa
   const linked = new Set(footerGroups.flatMap((group) => group.links.map((link) => link.href.slice(1))));
   for (const doc of docs) assert.ok(linked.has(doc.slug), doc.slug + " is linked from the footer");
   assert.ok(JSON.stringify(legalDocs.dataProtection).includes("Digital Personal Data Protection Act, 2023"));
+});
+
+test("Offline conversion: dictionary names, places, phrases and codes", () => {
+  const hi = (value: string) => convertOffline(value, "hindi");
+  assert.deepEqual(hi("Kesar Devi"), { text: "केसर देवी", confident: true });
+  assert.deepEqual(hi("12, Shastri Nagar, Ajmer"), { text: "12, शास्त्री नगर, अजमेर", confident: true });
+  assert.deepEqual(hi("Land of others"), { text: "अन्य की भूमि", confident: true });
+  assert.deepEqual(hi("Plot No. 38"), { text: "भूखण्ड संख्या 38", confident: true });
+  assert.deepEqual(hi("Smt. Kesar Devi"), { text: "श्रीमती केसर देवी", confident: true });
+  assert.equal(hi("B-204, Vaishali Nagar").text, "B-204, वैशाली नगर", "codes stay as typed");
+  assert.equal(hi("SBI").text, "SBI");
+  assert.equal(hi("Near Hanuman Temple").confident, false, "unknown words go to the AI");
+  const en = (value: string) => convertOffline(value, "english");
+  assert.deepEqual(en("मंजू देवी"), { text: "Manju Devi", confident: true });
+  assert.deepEqual(en("आम रास्ता"), { text: "Public road", confident: true });
+  assert.equal(en("सीमा कँवर").text, "Seema Kanwar", "chandrabindu spelling variant");
+  // Rule-based fallback deletes the silent inherent "a" like Indian spellings do.
+  assert.equal(en("हेमचन्द").text, "Hemchand");
+  assert.equal(en("परबतपुरा").text, "Parbatpura");
+  assert.equal(en("कमला").text, "Kamla");
+  assert.ok(isShortValue("Kesar Devi") && !isShortValue("That the seller shall pay all dues. The buyer shall get it mutated."));
+});
+
+test("Extraction clean-up: salutations, deceased relatives and unknown roles", () => {
+  const party = normaliseParty({ fullName: "श्रीमती केसर देवी", relation: "पत्नी", relativeName: "स्व. श्री रमेश चन्द" })!;
+  assert.equal(party.fullName, "केसर देवी");
+  assert.equal(party.gender, "female");
+  assert.equal(party.relativeName, "रमेश चन्द");
+  assert.equal(party.relativeDeceased, true);
+  assert.equal(party.role, "other", "an unknown role is never silently a witness");
+  assert.equal(normaliseParty({ fullName: "Smt. Kesar Devi", role: "first" })!.gender, "female");
+  assert.equal(normaliseParty({ fullName: "Shri Ram Lal", role: "first", relativeName: "Late Mohan Lal" })!.relativeDeceased, true);
+});
+
+test("Final check: shared ID numbers give one warning per person", () => {
+  const person = (id: string, role: string) => ({ id, role, fullName: "P " + id, relation: "S/o", relativeName: "R " + id, age: 40, aadhaar: "536346756192" });
+  const checks = finalChecks("sale", parseDeedData({ parties: [person("a", "first"), person("b", "second"), person("c", "witness")] }), "");
+  const dup = checks.filter((check) => check.id.startsWith("dup-"));
+  assert.equal(dup.length, 2);
+  assert.equal(new Set(checks.map((check) => check.id)).size, checks.length, "check ids are unique");
 });
 
 console.log("\n" + passed + " checks passed.");

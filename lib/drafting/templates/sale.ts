@@ -62,7 +62,6 @@ function english(ctx: Ctx): Block[] {
   const S = ctx.ref("first");
   const B = ctx.ref("second");
   const total = ctx.data.consideration.total;
-  const property = propertiesRef(ctx.data.properties, "english");
   const single = ctx.data.properties.length === 1;
   const cap = (value: string) => value[0].toUpperCase() + value.slice(1);
   const symbolic = ctx.data.terms.possession === "symbolic";

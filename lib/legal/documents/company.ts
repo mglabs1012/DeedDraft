@@ -111,8 +111,8 @@ export const help: LegalDoc = {
         {
           list: [
             "Create an account with your work email, confirm the email, then set up your firm (name and city).",
-            "Click “New deed”, choose the deed type and language, and start with the Documents tab.",
-            "Fill or check the Parties, Property, Title, Payments and Terms tabs, then open Generate to see the draft.",
+            "Click “New deed” (or “Start a new deed” on Home) and pick the document. The deed opens on Papers & details.",
+            "Follow the four numbered steps: add the papers, check the people, review the property, payment and terms, then prepare the draft in Hindi, English or both.",
           ],
         },
       ],
@@ -136,7 +136,7 @@ export const help: LegalDoc = {
       id: "reading",
       title: "When a document is not read correctly",
       body: [
-        "Use “Read text” on the document to see exactly what was read. Faded, handwritten or stamped pages and old fonts can be misread. Correct the details in the tabs by hand — never rely on extracted text without checking it against the original. We are not responsible if our AI or ML systems cannot read a document.",
+        "Under “Read an uploaded paper”, choose a document to see exactly what was read. Faded, handwritten or stamped pages and old fonts can be misread. Correct the details in the steps by hand — never rely on extracted text without checking it against the original. We are not responsible if our AI or ML systems cannot read a document.",
       ],
     },
     {
@@ -145,11 +145,11 @@ export const help: LegalDoc = {
       body: [
         {
           list: [
-            "Drafts are prepared in Hindi, English or both, depending on the deed type.",
+            "Drafts are prepared in Hindi, English or both. Names and addresses are written in the draft language automatically; check them under “Names in the draft language” on the Draft tab.",
             "Standard protective clauses are added automatically when the template does not already have them, and repeated clauses are removed.",
             "Add your own clauses in the Terms tab, or pick from the clause library.",
-            "Use “Edit & chat with AI” to change wording; every AI change is shown for you to apply or discard.",
-            "Run the Final check before printing and fix every point it raises.",
+            "Click any paragraph of the draft to edit it, or open the AI assistant to change wording; every AI change is shown for you to apply or discard.",
+            "Fix every problem listed at the top of the Draft tab before printing.",
           ],
         },
       ],

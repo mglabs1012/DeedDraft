@@ -9,7 +9,7 @@ import { isAiConfigured } from "@/lib/ai/claude";
 import { generateEditable } from "@/lib/drafting";
 import { dedupeEditable } from "@/lib/drafting/dedupe";
 import { applyOperations, type EditableDraft } from "@/lib/drafting/editable";
-import { parseDeedData } from "@/lib/schemas/deed-data";
+import { parseDeedData, type Localized } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
 import { assertTaskActive, reportDraftStage } from "@/lib/ai/task-context";
 
@@ -23,51 +23,87 @@ export async function loadStandardDrafts(input: unknown): Promise<{ error?: stri
   return error ? { error: "Draft versions could not be loaded. Check database migration 0004.", drafts: [] } : { drafts: data as SavedDraft[] };
 }
 
-export async function generateStandardDraft(input: unknown): Promise<{ error?: string; draft?: SavedDraft; notes?: string[] }> {
+type DraftLanguageChoice = "hindi" | "english";
+
+/**
+ * Prepares the draft in Hindi, English or both. The standard template draft is
+ * built instantly from the matter facts; the AI is only called when the user
+ * gave instructions (it then applies them with the firm's reference drafts as
+ * a style guide). Each language is saved as its own version.
+ */
+export async function generateStandardDraft(input: unknown): Promise<{ error?: string; draft?: SavedDraft; drafts?: SavedDraft[]; notes?: string[]; localized?: Localized }> {
   reportDraftStage("loading", "Loading your deed and instructions");
-  const parsed = z.object({ id: z.string().uuid(), language: z.enum(["hindi", "english"]), instructions: z.string().trim().max(4000) }).safeParse(input);
+  const parsed = z.object({ id: z.string().uuid(), language: z.enum(["hindi", "english", "both"]), instructions: z.string().trim().max(4000) }).safeParse(input);
   if (!parsed.success) return { error: "Check your instructions (maximum 4,000 characters)." };
   const workspace = await requireWorkspace();
   const { data: deed } = await workspace.supabase.from("deeds").select("*").eq("id", parsed.data.id).eq("firm_id", workspace.firm.id).maybeSingle();
   if (!deed) return { error: "Deed not found." };
-  const { error: remarksError } = await workspace.supabase.from("deeds").update({ remarks: parsed.data.instructions || null }).eq("id", deed.id).eq("firm_id", workspace.firm.id);
-  if (remarksError) return { error: "Instructions could not be saved. Try again." };
+  const instructions = parsed.data.instructions;
+  if ((deed.remarks ?? "") !== instructions) {
+    const { error: remarksError } = await workspace.supabase.from("deeds").update({ remarks: instructions || null }).eq("id", deed.id).eq("firm_id", workspace.firm.id);
+    if (remarksError) return { error: "Instructions could not be saved. Try again." };
+  }
+  const languages: DraftLanguageChoice[] = parsed.data.language === "both" ? ["hindi", "english"] : [parsed.data.language];
+  const label = (language: DraftLanguageChoice) => (languages.length > 1 ? (language === "hindi" ? "Hindi: " : "English: ") : "");
   let data = parseDeedData(deed.data);
-  let draft: EditableDraft;
   const notes: string[] = [];
+  const ai = isAiConfigured();
+  let built: Array<{ language: DraftLanguageChoice; draft: EditableDraft }>;
+
   if (data.custom) {
-    reportDraftStage("drafting", "Preparing the document from your template and papers");
-    const result = await draftFromTemplate({ id: deed.id, language: parsed.data.language });
-    if (result.error !== undefined) return { error: result.error };
-    draft = { language: parsed.data.language, blocks: [
-      { id: "title", kind: "title", text: result.draft.title },
-      ...result.draft.paragraphs.map((text, index) => ({ id: "p" + index, kind: "para" as const, text })),
-    ] };
+    // Library templates are written by the AI; one language at a time because each saves into the same record.
+    built = [];
+    for (const language of languages) {
+      reportDraftStage("drafting", "Preparing the " + (language === "hindi" ? "Hindi" : "English") + " document from your template and papers");
+      const result = await draftFromTemplate({ id: deed.id, language });
+      if (result.error !== undefined) return { error: label(language) + result.error };
+      built.push({ language, draft: { language, blocks: [
+        { id: "title", kind: "title", text: result.draft.title },
+        ...result.draft.paragraphs.map((text, index) => ({ id: "p" + index, kind: "para" as const, text })),
+      ] } });
+    }
   } else {
-    if (isAiConfigured()) {
-      reportDraftStage("converting", "Checking names and addresses in the draft language");
-      const converted = await convertForDraft({ deedId: deed.id, language: parsed.data.language });
-      if (converted.error !== undefined) notes.push("Name conversion: " + converted.error);
-      else data = { ...data, localized: converted.localized };
+    // Names and addresses in each draft's script: dictionary and firm spellings first, AI only for unknown words.
+    reportDraftStage("converting", "Writing names and addresses in " + (languages.length > 1 ? "Hindi and English" : languages[0] === "hindi" ? "Hindi" : "English"));
+    for (const language of languages) {
+      const converted = await convertForDraft({ deedId: deed.id, language });
+      if (converted.error !== undefined) { notes.push(label(language) + "Name conversion: " + converted.error); continue; }
+      data = { ...data, localized: converted.localized };
+      if (converted.toCheck.length) notes.push(label(language) + "Check how these were written: " + converted.toCheck.slice(0, 12).join("; ") + (converted.toCheck.length > 12 ? " …" : "") + ". Correct them under Names in the draft language.");
     }
     assertTaskActive();
-    reportDraftStage("drafting", "Building the draft and applying your clause instructions");
-    draft = generateEditable({ type: deed.deed_type, title: deed.title, referenceNo: deed.reference_no, data, firmName: workspace.firm.name, firmCity: workspace.firm.city }, parsed.data.language);
-    if (isAiConfigured()) {
-      const result = await chatEditDraft({ deedId: deed.id, draft, message: "Prepare this first draft using the saved matter facts. Follow these user drafting directions, adding, retaining or removing clauses as needed. Never invent missing facts; leave blanks for review.\n\n" + (parsed.data.instructions || "Retain the standard clauses and improve clarity.").slice(0, 3500), history: [] });
-      if (result.error !== undefined) return { error: "AI drafting did not finish: " + result.error + " Your documents and details are saved." };
-      draft = applyOperations(draft, result.operations);
-      notes.push(result.reply);
-      // Never save a draft with the same clause twice (the AI may re-add one the template has).
-      const unique = dedupeEditable(draft);
-      draft = unique.draft;
-      if (unique.removed.length) notes.push(unique.removed.length + " repeated clause" + (unique.removed.length === 1 ? " was" : "s were") + " removed from the AI draft.");
-    } else if (parsed.data.instructions) {
-      notes.push("AI is not configured. This is the standard template draft; your instructions are saved but have not been applied.");
+    reportDraftStage("drafting", instructions && ai ? "Applying your instructions to the draft" : "Building the draft from your papers");
+    const input = { type: deed.deed_type, title: deed.title, referenceNo: deed.reference_no, data, firmName: workspace.firm.name, firmCity: workspace.firm.city };
+    try {
+      built = await Promise.all(languages.map(async (language) => {
+        let draft = generateEditable(input, language);
+        if (instructions && ai) {
+          const result = await chatEditDraft({ deedId: deed.id, draft, useReferences: true, history: [], message: "Prepare this first draft using the saved matter facts. Follow these user drafting directions, adding, retaining or removing clauses as needed. Never invent missing facts; leave blanks for review.\n\n" + instructions.slice(0, 3500) });
+          if (result.error !== undefined) throw new Error(label(language) + "AI drafting did not finish: " + result.error + " Your documents and details are saved.");
+          draft = applyOperations(draft, result.operations);
+          notes.push(label(language) + result.reply);
+          // Never save a draft with the same clause twice (the AI may re-add one the template has).
+          const unique = dedupeEditable(draft);
+          draft = unique.draft;
+          if (unique.removed.length) notes.push(label(language) + unique.removed.length + " repeated clause" + (unique.removed.length === 1 ? " was" : "s were") + " removed.");
+        }
+        return { language, draft };
+      }));
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "AI drafting did not finish. Your documents and details are saved." };
     }
+    if (instructions && !ai) notes.push("AI is not configured, so this is the standard template draft. Your instructions are saved but have not been applied.");
+    else if (!instructions) notes.push("Standard draft prepared from your papers. To have the AI tailor the wording, write instructions and prepare a new version, or use the drafting assistant.");
   }
-  reportDraftStage("saving", "Saving a new draft version");
+
+  reportDraftStage("saving", "Saving " + (languages.length > 1 ? "both drafts" : "the draft"));
   assertTaskActive();
-  const result = await saveDraftVersion({ deedId: deed.id, draft, note: isAiConfigured() ? "Standard Mode — generated with AI; requires review" : "Standard template — requires review" });
-  return { ...result, notes };
+  const note = instructions && ai ? "Prepared with AI from your instructions; requires review" : "Standard template draft; requires review";
+  const saved: SavedDraft[] = [];
+  for (const { draft } of built) {
+    const result = await saveDraftVersion({ deedId: deed.id, draft, note });
+    if (result.error || !result.draft) return { error: result.error ?? "The draft could not be saved." };
+    saved.push(result.draft);
+  }
+  return { draft: saved[0], drafts: saved, notes, localized: data.localized };
 }

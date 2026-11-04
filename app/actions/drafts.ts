@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { editableDraftSchema } from "@/lib/drafting/editable";
@@ -41,6 +40,5 @@ export async function saveDraftVersion(input: unknown): Promise<{ error?: string
   if (error || !data) return { error: error?.code === "23505" ? "Someone saved a newer version at the same time. Reload and try again." : error?.message ?? "Could not save the draft." };
 
   await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, deed_id: deed.id, user_id: workspace.user.id, action: "saved_draft_version", details: { language: data.language, version } });
-  revalidatePath("/app/deeds/" + deed.id);
   return { draft: data as SavedDraft };
 }

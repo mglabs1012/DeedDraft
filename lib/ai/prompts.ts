@@ -15,6 +15,17 @@ Party roles in the NEW deed: "first" = ${config.roles.first.en}, "second" = ${co
 If the paper is a PRIOR title document (earlier sale deed, patta, allotment), its buyer/allottee is usually the present owner → role "first" of the new deed, and the paper itself becomes a titleChain entry. Its seller goes into titleChain.from, not into parties.
 Do not carry witnesses from an old deed into the new deed. Only identify a current buyer, seller or witness when the paper explicitly establishes that current role. An identity card alone does not establish a transaction role: use "other" and add a warning asking the user to assign the role.
 
+Reading rules (these papers are usually Hindi, sometimes typed in the old Kruti Dev font or photographed):
+- Copy names, castes, places and boundaries exactly as written, in the same script. Do not translate or transliterate them; the app converts them for the draft language later. Repair only obvious Kruti Dev or OCR breakage (e.g. a broken matra) when you are certain.
+- Relations: पुत्र/सुपुत्र = S/o, पुत्री = D/o, पत्नी/धर्मपत्नी = W/o, विधवा = W/o with relativeDeceased true; "स्व." / "स्वर्गीय" / "late" before the relative's name also means relativeDeceased true (leave the prefix out of relativeName).
+- Salutations (श्री, श्रीमती, सुश्री, Shri, Smt.) are not part of the name; श्रीमती/सुश्री/Smt. also tell you the gender is female.
+- Area: वर्गगज = sq_yd, वर्गमीटर = sq_m, वर्गफुट = sq_ft, बीघा = bigha, हैक्टेयर = hectare. When the same area is stated in several units, use the first one stated. Never add areas of different properties together.
+- Boundaries: पूर्व = east, पश्चिम = west, उत्तर = north, दक्षिण = south; the measurement of that side (e.g. 30 फीट) goes in eastSize etc.
+- Amounts written in words (चार लाख पचास हजार) must match the figure; if they differ, use the figure and add a warning.
+- Aadhaar: only a full 12-digit number. A masked number (XXXX XXXX 1234) is not an Aadhaar number: leave it out and mention it in warnings.
+- Dates as DD/MM/YYYY. A registration endorsement (book/जिल्द/page/क्रम संख्या, पंजीयन दिनांक) belongs to the titleChain entry of THIS paper.
+- Never guess: leave a field out rather than invent it, and list anything you could not read in warnings.
+
 Return JSON with this shape (omit unknown fields, use [] for empty lists):
 {
   "summary": "one-line description of the paper",

@@ -1,35 +1,51 @@
 import Link from "next/link";
-import { ArrowRight, FileText, Sparkles } from "lucide-react";
+import { ArrowRight, FileText } from "lucide-react";
+
+import { getDeedType } from "@/lib/deed-types";
 import { requireWorkspace } from "@/lib/workspace";
 
 export const metadata = { title: "Your workspace" };
 
+const quickTypes = ["sale", "agreement_to_sell", "gift", "rent", "lease", "will"] as const;
+
 export default async function DashboardPage() {
   const { supabase, firm } = await requireWorkspace();
   const { data: deeds, error } = await supabase.from("deeds")
-    .select("id, title, reference_no, updated_at").eq("firm_id", firm.id)
-    .order("updated_at", { ascending: false }).limit(5);
+    .select("id, title, reference_no, deed_type, updated_at").eq("firm_id", firm.id)
+    .order("updated_at", { ascending: false }).limit(6);
   return (
-    <div className="mx-auto max-w-6xl">
-      <section className="pb-12 pt-8 sm:pt-14">
-        <p className="text-xs font-medium uppercase tracking-[.2em] text-muted-foreground">Your drafting workspace</p>
-        <h1 className="mt-4 text-3xl font-medium tracking-tight text-primary sm:text-5xl">Your papers. A clearer draft.</h1>
-        <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground">Start with a template. Upload your documents, tell us what you need, and review the draft together.</p>
-        <div className="mt-9 grid gap-4 sm:grid-cols-2">
-          <Link data-tour="standard-mode" href="/app/deeds/new" className="group flex min-h-48 flex-col rounded-2xl border border-primary/25 bg-card p-6 transition hover:border-primary hover:shadow-sm focus-visible:outline-2 focus-visible:outline-primary">
-            <FileText className="size-5 text-primary" /><h2 className="mt-5 text-lg font-semibold text-primary">Standard Mode</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">Your documents, guided by AI. Simple from start to draft.</p>
-            <span className="mt-6 flex items-center gap-2 text-sm font-medium text-primary">Choose a template <ArrowRight className="size-4 transition group-hover:translate-x-1" /></span>
-          </Link>
-          <div aria-disabled="true" className="flex min-h-48 flex-col rounded-2xl border border-border bg-secondary/20 p-6">
-            <Sparkles className="size-5 text-muted-foreground" /><div className="mt-5 flex items-center gap-3"><h2 className="text-lg font-semibold text-muted-foreground">Premium Mode</h2><span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">Coming later</span></div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">A workspace for more complex matters. Standard Mode is ready to use now.</p>
-          </div>
+    <div className="mx-auto max-w-5xl">
+      <section className="pb-10 pt-4 sm:pb-12 sm:pt-10">
+        <p className="text-xs font-medium uppercase tracking-[.2em] text-muted-foreground">{firm.name}</p>
+        <h1 className="mt-3 text-3xl font-medium tracking-tight text-primary sm:text-4xl">Your papers. A clearer draft.</h1>
+        <p className="mt-3 max-w-xl text-base leading-7 text-muted-foreground">Pick a document, upload the property papers, check the details and prepare the draft — in Hindi, English or both.</p>
+        <Link data-tour="standard-mode" href="/app/deeds/new" className="group mt-7 flex items-center gap-4 rounded-2xl border border-primary/25 bg-card p-5 transition hover:border-primary hover:shadow-sm focus-visible:outline-2 focus-visible:outline-primary sm:p-6">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileText className="size-5" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-lg font-semibold text-primary">Start a new deed</span>
+            <span className="mt-1 block text-sm leading-6 text-muted-foreground">Choose from sale, gift, rent and 950+ other templates.</span>
+          </span>
+          <ArrowRight className="size-5 shrink-0 text-primary transition group-hover:translate-x-1" />
+        </Link>
+        <div className="mt-4 flex flex-wrap gap-2" aria-label="Common documents">
+          {quickTypes.map((type) => {
+            const config = getDeedType(type);
+            return <Link key={type} href={"/app/deeds/new?type=" + type} className="rounded-full border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground transition hover:border-primary/40 hover:text-primary">{config.label} <span className="font-devanagari text-xs">· {config.labelHi}</span></Link>;
+          })}
         </div>
       </section>
       <section data-tour="recent-deeds" aria-labelledby="recent-heading" className="border-t border-border pt-7">
-        <div className="flex items-center justify-between"><h2 id="recent-heading" className="text-sm font-medium text-primary">Continue a deed</h2><Link href="/app/deeds" className="text-xs text-muted-foreground hover:text-primary">View all</Link></div>
-        {error ? <p role="alert" className="mt-5 text-sm text-destructive">Recent deeds could not be loaded. Refresh to try again.</p> : !deeds?.length ? <p className="mt-5 text-sm text-muted-foreground">Your recent work will appear here.</p> : <ul className="mt-3 divide-y divide-border">{deeds.map((deed) => <li key={deed.id}><Link href={"/app/deeds/" + deed.id} className="flex items-center justify-between gap-4 py-4 text-sm hover:text-primary"><span className="min-w-0 truncate">{deed.title}</span><span className="shrink-0 text-xs text-muted-foreground">{deed.reference_no}</span></Link></li>)}</ul>}
+        <div className="flex items-center justify-between"><h2 id="recent-heading" className="text-sm font-medium text-primary">Continue a deed</h2><Link href="/app/deeds" className="text-sm text-muted-foreground hover:text-primary">View all</Link></div>
+        {error ? <p role="alert" className="mt-5 text-sm text-destructive">Recent deeds could not be loaded. Refresh to try again.</p>
+          : !deeds?.length ? <p className="mt-5 text-sm text-muted-foreground">Your recent work will appear here.</p>
+          : <ul className="mt-3 divide-y divide-border">{deeds.map((deed) => (
+            <li key={deed.id}>
+              <Link href={"/app/deeds/" + deed.id} className="flex items-center justify-between gap-4 py-3.5 text-sm hover:text-primary">
+                <span className="min-w-0"><span className="block truncate font-medium">{deed.title}</span><span className="mt-0.5 block text-xs text-muted-foreground">{getDeedType(deed.deed_type).label} · {deed.reference_no}</span></span>
+                <span className="shrink-0 text-xs text-muted-foreground">{new Date(deed.updated_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>
+              </Link>
+            </li>
+          ))}</ul>}
       </section>
     </div>
   );

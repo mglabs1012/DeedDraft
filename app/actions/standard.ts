@@ -1,7 +1,6 @@
 "use server";
 
 import { z } from "zod";
-import { revalidatePath } from "next/cache";
 import { extractFromDocument, readDocumentText } from "@/app/actions/ai";
 import { mergeExtraction } from "@/lib/ai/contract";
 import { parseDeedData, sectionSchemas, standardWorkspaceSchema, type DeedData } from "@/lib/schemas/deed-data";
@@ -27,7 +26,6 @@ async function mutate(id: string, transform: (data: DeedData) => Partial<DeedDat
       .select("data").maybeSingle();
     if (saveError) return { error: "Changes could not be saved. Please try again." };
     if (saved) {
-      revalidatePath("/app/deeds/" + id);
       return { data: parseDeedData(saved.data) };
     }
   }
