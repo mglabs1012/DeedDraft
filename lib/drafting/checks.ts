@@ -86,7 +86,7 @@ export function finalChecks(type: DeedType, data: DeedData, draftText = "", toda
   for (const party of data.parties) {
     for (const key of [digits(party.aadhaar).length === 12 ? "a" + digits(party.aadhaar) : "", party.pan ? "p" + party.pan.toUpperCase() : ""].filter(Boolean)) {
       const other = seen.get(key);
-      if (other && other.id !== party.id) add("dup-" + key, "error", label(other) + " and " + label(party) + " have the same " + (key.startsWith("a") ? "Aadhaar" : "PAN") + " number.", "parties");
+      if (other && other.id !== party.id) add("dup-" + key + "-" + party.id, "error", label(other) + " and " + label(party) + " have the same " + (key.startsWith("a") ? "Aadhaar" : "PAN") + " number.", "parties");
       else seen.set(key, party);
     }
   }

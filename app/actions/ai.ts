@@ -6,10 +6,9 @@ import { AI_NOT_CONFIGURED, AiError, MAX_DOCUMENTS_PER_REQUEST, aiModel, fileBlo
 import { aiAllowance } from "@/lib/ai/guard.server";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { identityWarnings, normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, type Extraction, type ReviewIssue } from "@/lib/ai/parse";
-import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "@/lib/ai/prompts";
+import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt } from "@/lib/ai/prompts";
 import { relevantFacts } from "@/lib/ai/facts";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
-import { getReadiness } from "@/lib/drafting";
 import { draftForAi, editableDraftSchema, validOperations, type EditOperation } from "@/lib/drafting/editable";
 import { readDocument, type ReadResult } from "@/lib/ocr/read";
 import { parseDeedData, type DeedData, type Party, type Property } from "@/lib/schemas/deed-data";
@@ -217,47 +216,6 @@ export async function draftClauses(input: unknown): Promise<Result<{ clauses: st
   }
 }
 
-/* ---------------------------------------------------------------- Review */
-
-export async function reviewDeed(input: unknown): Promise<Result<{ issues: ReviewIssue[] }>> {
-  const parsed = z.object({ deedId: z.string().uuid() }).safeParse(input);
-  if (!parsed.success) return { error: "Invalid request." };
-  if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
-
-  const { workspace, deed } = await loadDeed(parsed.data.deedId);
-  if (!deed) return { error: "Deed not found." };
-  const limited = await aiAllowance(workspace);
-  if (limited) return { error: limited };
-
-  const data = parseDeedData(deed.data);
-  const { count: documentCount } = await workspace.supabase.from("deed_documents").select("id", { count: "exact", head: true }).eq("deed_id", deed.id);
-
-  try {
-    const memory = await draftingContext(workspace, deed.deed_type, deed.language === "english" ? "english" : "hindi", { references: false });
-    const { data: raw, usage } = await generateJson({
-      temperature: 0,
-      system: reviewPrompt(deed.deed_type),
-      cachedContext: memory.text || undefined,
-      schema: reviewSchema,
-      name: "save_review",
-      description: "Save the review findings",
-      content: JSON.stringify({
-        deedType: deed.deed_type,
-        draftLanguage: deed.language,
-        clientRemarks: deed.remarks ?? "",
-        uploadedDocuments: documentCount ?? 0,
-        checklist: getReadiness(deed.deed_type, data, documentCount ?? 0).filter((item) => !item.done).map((item) => item.label),
-        matter: redact(data, deed.deed_type),
-      }),
-    });
-    const issues = normaliseReview(raw);
-    await logUsage(workspace, deed.id, "ai_reviewed_deed", usage, { issues: issues.length });
-    return { issues };
-  } catch (error) {
-    return failure(error);
-  }
-}
-
 /* ------------------------------------------- Autofill a form from papers */
 
 const autofillSchema = z.object({
@@ -359,6 +317,8 @@ const chatSchema = z.object({
   draft: editableDraftSchema,
   message: z.string().trim().min(2, "Type an instruction.").max(4000),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+  /** Include the firm's accepted reference drafts as a style guide (used when preparing a first draft). */
+  useReferences: z.boolean().optional(),
 });
 
 const chatReplySchema = {
@@ -375,10 +335,10 @@ export async function chatEditDraft(input: unknown): Promise<Result<{ reply: str
   if (!deed) return { error: "Deed not found." };
   const limited = await aiAllowance(workspace);
   if (limited) return { error: limited };
-  const { draft, message, history } = parsed.data;
+  const { draft, message, history, useReferences } = parsed.data;
 
   try {
-    const memory = await draftingContext(workspace, deed.deed_type, draft.language, { references: false });
+    const memory = await draftingContext(workspace, deed.deed_type, draft.language, { references: Boolean(useReferences) });
     const turns = [...history, { role: "user" as const, content: message }];
     while (turns.length && turns[0].role !== "user") turns.shift();
     const { data: raw, usage } = await generateJson<{ reply?: unknown; operations?: unknown }>({
@@ -393,9 +353,11 @@ export async function chatEditDraft(input: unknown): Promise<Result<{ reply: str
     });
     const operations = validOperations(draft, Array.isArray(raw.operations) ? raw.operations : []);
     const reply = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 4000) : operations.length ? "Proposed " + operations.length + " change(s)." : "No changes proposed.";
-    await remember(workspace, deed.id, "user", message, { language: draft.language });
-    await remember(workspace, deed.id, "assistant", reply, { operations: operations.length });
-    await logUsage(workspace, deed.id, "ai_chat_draft", usage, { operations: operations.length });
+    await Promise.all([
+      remember(workspace, deed.id, "user", message, { language: draft.language }),
+      remember(workspace, deed.id, "assistant", reply, { operations: operations.length }),
+      logUsage(workspace, deed.id, "ai_chat_draft", usage, { operations: operations.length }),
+    ]);
     return { reply, operations };
   } catch (error) {
     return failure(error);
@@ -423,8 +385,10 @@ export async function reviewDraftText(input: unknown): Promise<Result<{ issues: 
       temperature: 0,
     });
     const issues = normaliseReview(raw);
-    await remember(workspace, deed.id, "assistant", "Reviewed the draft: " + issues.length + " issue(s).", { review: true });
-    await logUsage(workspace, deed.id, "ai_reviewed_draft", usage, { issues: issues.length });
+    await Promise.all([
+      remember(workspace, deed.id, "assistant", "Reviewed the draft: " + issues.length + " issue(s).", { review: true }),
+      logUsage(workspace, deed.id, "ai_reviewed_draft", usage, { issues: issues.length }),
+    ]);
     return { issues };
   } catch (error) {
     return failure(error);

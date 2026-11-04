@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { AI_NOT_CONFIGURED, AiError, generateJson, isAiConfigured, usageDetails } from "@/lib/ai/claude";
@@ -42,7 +41,6 @@ async function saveCustom(workspace: Awaited<ReturnType<typeof requireWorkspace>
   const error = await saveDeedSection(workspace, deedId, "custom", custom);
   if (error) return error;
   await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, deed_id: deedId, user_id: workspace.user.id, action, details });
-  revalidatePath("/app/deeds/" + deedId);
   return null;
 }
 

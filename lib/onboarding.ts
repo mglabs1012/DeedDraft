@@ -1,9 +1,9 @@
 export type TourStep = { target: string; title: string; text: string };
 export const tours: Record<string, { label: string; steps: TourStep[] }> = {
   home: { label: "Getting started", steps: [
-    { target: "standard-mode", title: "Your first deed starts here", text: "Choose Standard Mode to begin. You will pick a document template, upload papers, check the details, and prepare a draft. No legal drafting experience is needed to follow the steps." },
+    { target: "standard-mode", title: "Your first deed starts here", text: "Choose Start a new deed, or one of the common documents below it. You will pick a template, upload papers, check the details and prepare a draft. No legal drafting experience is needed to follow the steps." },
     { target: "recent-deeds", title: "Come back to saved work", text: "Recent deeds appear here. My deeds in the top menu shows all your matters. Open an existing deed to continue; you do not need to start again." },
-    { target: "quick-tour", title: "Help is always here", text: "Use Quick tour to repeat the guide for the screen you are on. Small question-mark buttons give extra help when you hover, focus or tap them. Next, choose Standard Mode." },
+    { target: "quick-tour", title: "Help is always here", text: "Use Quick tour to repeat the guide for the screen you are on. Small question-mark buttons give extra help when you hover, focus or tap them. Next, choose Start a new deed." },
   ] },
   templates: { label: "Choose a template", steps: [
     { target: "templates", title: "What document do you need?", text: "Search using everyday words such as sale deed, rent agreement or will. You can also choose a category. Select the template that matches your matter—not just a similar-looking title." },

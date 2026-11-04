@@ -10,7 +10,7 @@ import {
   updateDeedTitleSchema,
   updateRemarksSchema,
 } from "@/lib/schemas/deeds";
-import { emptyDeedData, parseDeedData, updateDeedSectionSchema } from "@/lib/schemas/deed-data";
+import { emptyDeedData, parseDeedData } from "@/lib/schemas/deed-data";
 import { getLibraryEntry } from "@/lib/templates/library.server";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
@@ -94,8 +94,6 @@ export async function updateDeedTitle(input: unknown): Promise<ActionResult> {
     details: { title: parsed.data.title },
   });
 
-  revalidatePath("/app/deeds/" + deed.id);
-  revalidatePath("/app/deeds");
   return {};
 }
 
@@ -149,7 +147,6 @@ export async function updateRemarks(input: unknown): Promise<ActionResult> {
     details: {},
   });
 
-  revalidatePath("/app/deeds/" + deed.id);
   return {};
 }
 
@@ -223,48 +220,5 @@ export async function deleteDeed(input: unknown): Promise<ActionResult> {
 
   revalidatePath("/app/deeds");
   revalidatePath("/app/dashboard");
-  return {};
-}
-
-export async function updateDeedSection(input: unknown): Promise<ActionResult> {
-  const parsed = updateDeedSectionSchema.safeParse(input);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    const row = issue?.path.find((part) => typeof part === "number");
-    return { error: (typeof row === "number" ? "Item " + (row + 1) + ": " : "") + (issue?.message ?? "Invalid details.") };
-  }
-
-  const { workspace, deed } = await findDeed(parsed.data.id);
-  if (!deed) return { error: "Deed not found." };
-
-  // Atomic per-section update (migration 0003); falls back to read-modify-write
-  // on databases where the function has not been created yet.
-  const { error: rpcError } = await workspace.supabase.rpc("update_deed_section", {
-    p_deed_id: deed.id,
-    p_section: parsed.data.section,
-    p_value: parsed.data.value as unknown as Json,
-  });
-
-  if (rpcError) {
-    const missingFunction = rpcError.code === "PGRST202" || rpcError.code === "42883";
-    if (!missingFunction) return { error: userMessage(rpcError) };
-    const data = { ...parseDeedData(deed.data), [parsed.data.section]: parsed.data.value };
-    const { error } = await workspace.supabase
-      .from("deeds")
-      .update({ data: data as unknown as Json })
-      .eq("id", deed.id);
-    if (error) return { error: userMessage(error) };
-  }
-
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
-    deed_id: deed.id,
-    user_id: workspace.user.id,
-    action: "updated_" + parsed.data.section,
-    details: {},
-  });
-
-  revalidatePath("/app/deeds/" + deed.id);
-  revalidatePath("/app/deeds");
   return {};
 }

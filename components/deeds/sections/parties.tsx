@@ -54,7 +54,7 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
         }
         description={roles.first.en + " (" + roles.first.hi.m + "), " + roles.second.en.toLowerCase() + " (" + roles.second.hi.m + ") and witnesses."}
         title="Parties"
-      /> : <div className="border-b border-border px-5 py-4"><h2 className="font-medium text-primary">People in this deed</h2><p className="mt-1 text-xs text-muted-foreground">AI fills what it can find. Add anyone missing or edit any detail.</p></div>}
+      /> : null}
       {parties.length || compact ? (
         <div className={compact ? "grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0" : "divide-y divide-border"}>
           {order.map((role) => {
@@ -74,19 +74,19 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
                   <div className={compact ? "mt-3 grid gap-3" : "mt-3 grid gap-3 lg:grid-cols-2"}>
                     {group.map((party) => (
                       <article className="flex gap-3 rounded-lg border border-border p-3 sm:p-4" key={party.id}>
-                        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary">
+                        <span className="hidden size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary sm:grid">
                           {party.organisation ? <Building className="size-4" /> : <UserRound className="size-4" />}
                         </span>
                         <div className="min-w-0 flex-1">
                           {party.organisation ? <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">M/s. {party.organisation}</p> : null}
-                          <p className="break-words font-semibold text-primary">{displayName(party, "hindi")}{party.alias ? <span className="font-normal text-muted-foreground"> उर्फ {party.alias}</span> : null}</p>
+                          <p className="break-words font-semibold text-primary">{displayName(party, /[\u0900-\u097F]/.test(party.fullName) ? "hindi" : "english")}{party.alias ? <span className="font-normal text-muted-foreground"> उर्फ {party.alias}</span> : null}</p>
                           <p className="text-sm text-muted-foreground">
                             {[party.relativeName ? party.relation + " " + (party.relativeDeceased ? "Late " : "") + party.relativeName : "", party.age ? party.age + " yrs" : "", party.caste, party.occupation].filter(Boolean).join(" · ") || "Details pending"}
                           </p>
                           {party.address ? <p className="mt-1 text-sm leading-5 text-foreground/80">{party.address}</p> : null}
                           <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                            {party.aadhaar ? <span className="rounded bg-secondary px-2 py-0.5 font-mono">Aadhaar {formatAadhaar(party.aadhaar, true)}</span> : null}
-                            {party.pan ? <span className="rounded bg-secondary px-2 py-0.5 font-mono">PAN {party.pan}</span> : null}
+                            {party.aadhaar ? <span className="whitespace-nowrap rounded bg-secondary px-2 py-0.5 font-mono">Aadhaar {formatAadhaar(party.aadhaar, true)}</span> : null}
+                            {party.pan ? <span className="whitespace-nowrap rounded bg-secondary px-2 py-0.5 font-mono">PAN {party.pan}</span> : null}
                             {party.gstin ? <span className="rounded bg-secondary px-2 py-0.5 font-mono">GSTIN {party.gstin}</span> : null}
                             {party.phone ? <span className="rounded bg-secondary px-2 py-0.5">{party.phone}</span> : null}
                             {party.representedBy ? <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-800">Through representative</span> : null}

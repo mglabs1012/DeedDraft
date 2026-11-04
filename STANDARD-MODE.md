@@ -8,6 +8,16 @@
 - The walkthrough never creates a deed, selects a template, uploads papers or invokes AI. Those actions remain explicit user choices. Legal review reminders appear before drafting and exporting.
 - Browser verification used an isolated synthetic preview (removed after testing), because the preview browser was signed out. Verified auto-start, Next/Back, completion persistence, next-screen guidance, Escape/Skip persistence, replay and tap help. Signed-in integration still needs a user smoke test.
 
+## November 4 debugging pass
+
+- **Translation (fast and reusable):** names, places and deed words are written in the draft language in four layers: the firm's spellings from its recent deeds, then a built-in dictionary of Rajasthan names, places and deed vocabulary (instant, free), then the AI only for unknown words (parallel batches on the fast model), then a rule-based transliteration when AI is unavailable. Values the AI did not convert are listed for review. The Draft tab has **Names in the draft language** to correct any spelling; corrections are reused for the firm's next deeds.
+- **Hindi, English or both:** Step 4 offers *Both*; each language is saved as its own version.
+- **Faster drafting:** with no instructions, the draft is built from the template instantly (no AI pass). With instructions, the AI applies them using the firm's accepted reference drafts as a style guide. Saving a section no longer re-renders the whole deed page on the server, papers are read two at a time, and large PDFs are split in linear time.
+- **AI learning:** *Teach AI this style* on a saved draft keeps it (anonymised) as a firm reference. Extraction rules cover Hindi relations, salutations, deceased relatives, area units, boundaries and masked Aadhaar numbers; an unknown role is never silently a witness.
+- **Workspace:** four numbered steps (papers → people → property, payment & terms → draft); Seller, Buyer, Witnesses in deed order; the draft reads as it will print and any paragraph opens for editing on click; on phones the AI assistant opens as a bottom sheet.
+- **Removed:** the unreachable classic deed screen and its AI panels, the non-functional Hindi/English interface switch, and the disabled Premium Mode placeholder.
+- **Security:** Next.js upgraded from 16.4.0 to 16.4.5 for a critical advisory. Zod 3 still has a high advisory whose fix requires the Zod 4 major upgrade.
+
 ## What changed
 
 - Home offers Standard Mode and a non-interactive Premium Mode placeholder.

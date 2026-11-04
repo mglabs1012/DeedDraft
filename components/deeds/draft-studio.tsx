@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Bot, Check, FileDown, History, Lock, LoaderCircle, MessageSquare, Plus, Printer, RotateCcw, Save, Send, ShieldCheck, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Bot, Check, FileDown, GraduationCap, History, Lock, LoaderCircle, MessageSquare, Plus, Printer, RotateCcw, Save, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { chatEditDraft, reviewDraftText } from "@/app/actions/ai";
 import { saveDraftVersion, type SavedDraft } from "@/app/actions/drafts";
+import { saveDraftAsReference } from "@/app/actions/memory";
 import { Button } from "@/components/ui/button";
 import type { ReviewIssue } from "@/lib/ai/parse";
 import type { DraftLanguage } from "@/lib/deed-types";
 import { renderBlock, renderDraftHtml } from "@/lib/drafting/blocks";
-import { applyOperations, fromEditable, type EditableBlock, type EditableDraft, type EditOperation, type TextKind } from "@/lib/drafting/editable";
+import { applyOperations, fromEditable, markupToHtml, type EditableBlock, type EditableDraft, type EditOperation, type TextKind } from "@/lib/drafting/editable";
 import { cn } from "@/lib/utils";
 
 type ChatTurn =
@@ -29,17 +30,54 @@ const kindStyles: Record<TextKind, string> = {
 
 const kindLabels: Record<TextKind, string> = { invocation: "Invocation", title: "Title", meta: "Sub-title", heading: "Heading", para: "Paragraph", clause: "Clause", detail: "Detail" };
 
-function AutoText({ value, onChange, className, hindi }: { value: string; onChange: (value: string) => void; className?: string; hindi: boolean }) {
+const blockBase = "w-full rounded-md border border-transparent px-2 py-1.5 leading-7";
+
+/** A block as it will print: bold names, no markup. Click, tap or Enter to edit. */
+function BlockText({ value, className, hindi, onEdit }: { value: string; className?: string; hindi: boolean; onEdit: () => void }) {
+  return (
+    <div
+      aria-label="Edit text"
+      className={cn(blockBase, "cursor-text whitespace-pre-wrap break-words hover:border-border hover:bg-secondary/30 focus-visible:border-primary focus-visible:outline-none", hindi && "font-devanagari text-[15px]", className)}
+      dangerouslySetInnerHTML={{ __html: markupToHtml(value).value || "&nbsp;" }}
+      onClick={onEdit}
+      onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onEdit(); } }}
+      role="button"
+      tabIndex={0}
+    />
+  );
+}
+
+function AutoText({ value, onChange, className, hindi, onDone }: { value: string; onChange: (value: string) => void; className?: string; hindi: boolean; onDone?: () => void }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  const editingNow = Boolean(onDone);
+  // Opened from the reading view: caret at the end of the paragraph.
   useEffect(() => {
-    if (!ref.current) return;
-    ref.current.style.height = "auto";
-    ref.current.style.height = ref.current.scrollHeight + "px";
+    const element = ref.current;
+    if (!element || !editingNow) return;
+    element.setSelectionRange(element.value.length, element.value.length);
+  }, [editingNow]);
+  // Sized before paint (no visible jump), and again when the column width changes.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const fit = () => { element.style.height = "auto"; element.style.height = element.scrollHeight + "px"; };
+    fit();
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      fit();
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [value]);
   return (
     <textarea
-      className={cn("w-full resize-none overflow-hidden rounded-md border border-transparent bg-transparent px-2 py-1.5 leading-7 outline-none transition hover:border-border focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/10", hindi && "font-devanagari text-[15px]", className)}
+      autoFocus={Boolean(onDone)}
+      className={cn(blockBase, "resize-none overflow-hidden bg-transparent outline-none transition hover:border-border focus:border-primary focus:bg-card focus:ring-2 focus:ring-primary/10", hindi && "font-devanagari text-[15px]", className)}
+      onBlur={onDone}
       onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => { if (event.key === "Escape") onDone?.(); }}
       ref={ref}
       rows={1}
       value={value}
@@ -71,7 +109,9 @@ export function DraftStudio({
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [message, setMessage] = useState("");
   const [highlight, setHighlight] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState(aiEnabled);
+  const [editing, setEditing] = useState<string | null>(null);
+  // Narrow screens: the assistant opens as a bottom sheet; wide screens always show it beside the draft.
+  const [sheet, setSheet] = useState(false);
   const [pending, startTransition] = useTransition();
   const [saving, startSaving] = useTransition();
   const dirty = JSON.stringify(draft) !== baseline;
@@ -104,15 +144,18 @@ export function DraftStudio({
 
   const update = (id: string, text: string) => setDraft((current) => ({ ...current, blocks: current.blocks.map((block) => (block.id === id && block.kind !== "locked" ? { ...block, text } : block)) }));
   const remove = (id: string) => setDraft((current) => ({ ...current, blocks: current.blocks.filter((block) => block.id !== id) }));
-  const insertAfter = (id: string) =>
+  const insertAfter = (id: string) => {
+    const newId = "u" + Date.now().toString(36);
+    setEditing(newId);
     setDraft((current) => {
       const index = current.blocks.findIndex((block) => block.id === id);
       const target = current.blocks[index];
-      const block: EditableBlock = { id: "u" + Date.now().toString(36), kind: "clause", text: hindi ? "यह कि " : "That ", numbered: target && target.kind === "clause" ? target.numbered : false };
+      const block: EditableBlock = { id: newId, kind: "clause", text: hindi ? "यह कि " : "That ", numbered: target && target.kind === "clause" ? target.numbered : false };
       const blocks = [...current.blocks];
       blocks.splice(index + 1, 0, block);
       return { ...current, blocks };
     });
+  };
 
   const save = () =>
     startSaving(async () => {
@@ -123,6 +166,17 @@ export function DraftStudio({
       setBaseline(JSON.stringify(draft));
       onSaved(result.draft);
     });
+
+  const [teaching, startTeaching] = useTransition();
+  const teach = () => {
+    if (!window.confirm("Keep this draft as a style reference? Names, numbers and addresses are removed by the AI before it is stored, and future " + (hindi ? "Hindi" : "English") + " drafts of this type will follow its structure and wording. You can remove it under Settings → AI memory.")) return;
+    startTeaching(async () => {
+      const text = draft.blocks.map((block) => (block.kind === "locked" ? "" : block.text.replace(/\*\*/g, ""))).filter(Boolean).join("\n\n");
+      const result = await saveDraftAsReference({ deedId, language, text });
+      if (result.error !== undefined) return void toast.error(result.error);
+      toast.success("Saved as a style reference", { description: "Future drafts of this type will follow it." });
+    });
+  };
 
   const send = (text: string) => {
     const instruction = text.trim();
@@ -162,6 +216,7 @@ export function DraftStudio({
   };
 
   const jump = (id: string) => {
+    setSheet(false);
     setHighlight(id);
     document.getElementById("block-" + id)?.scrollIntoView({ behavior: "smooth", block: "center" });
     window.setTimeout(() => setHighlight(null), 2500);
@@ -207,18 +262,21 @@ export function DraftStudio({
           </select>
         </label>
         <span className={cn("text-xs font-semibold", dirty ? "text-amber-700" : "text-emerald-700")}>{dirty ? "Unsaved changes" : versions.length ? "Saved (v" + versions[0].version + ")" : "Generated draft"}</span>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           {aiEnabled ? (
-            <Button className="h-9 xl:hidden" onClick={() => setChatOpen((open) => !open)} type="button" variant="outline"><MessageSquare className="size-4" /> {chatOpen ? "Hide" : "AI"}</Button>
+            <Button className="h-9 xl:hidden" onClick={() => setSheet(true)} type="button" variant="outline"><MessageSquare className="size-4" /> AI assistant</Button>
           ) : null}
           <Button className="h-9" disabled={!dirty} onClick={() => load(JSON.parse(baseline) as EditableDraft)} type="button" variant="ghost"><RotateCcw className="size-4" /> Undo all</Button>
           <Button className="h-9" disabled={saving || !dirty} onClick={save} type="button">{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />} Save version</Button>
+          {aiEnabled && !dirty && versions.length ? (
+            <Button className="h-9" disabled={teaching} onClick={teach} title="Keep this reviewed draft as a style reference for future drafts of this type" type="button" variant="outline">{teaching ? <LoaderCircle className="size-4 animate-spin" /> : <GraduationCap className="size-4" />} Teach AI this style</Button>
+          ) : null}
         </div>
       </div>
 
-      <div className={cn("grid gap-4", aiEnabled && chatOpen && "xl:grid-cols-[minmax(0,1fr)_400px]")}>
+      <div className={cn("grid gap-4", aiEnabled && "xl:grid-cols-[minmax(0,1fr)_400px]")}>
         <section className="rounded-xl border border-border bg-white p-3 shadow-sm sm:p-6">
-          <p className="mb-3 rounded-md bg-secondary/60 px-3 py-2 text-xs text-muted-foreground">Click any text to edit. Locked blocks (boundaries, schedules, signatures) come from the matter details. Use **double asterisks** for bold.</p>
+          <p className="mb-3 rounded-md bg-secondary/60 px-3 py-2 text-xs text-muted-foreground">Click or tap any paragraph to edit it. Boundaries, tables and signatures come from the matter details. In the editor, **double asterisks** make text bold.</p>
           <div className={cn("space-y-1 text-[15px] text-neutral-900", hindi ? "font-devanagari" : "font-serif")}>
             {draft.blocks.map((block) =>
               block.kind === "locked" ? (
@@ -229,7 +287,7 @@ export function DraftStudio({
               ) : (
                 <div className={cn("group relative flex gap-1 rounded-md", highlight === block.id && "bg-accent/15 ring-2 ring-accent")} id={"block-" + block.id} key={block.id}>
                   <div className="min-w-0 flex-1">
-                    <AutoText className={cn(kindStyles[block.kind], block.center && "text-center", block.kind === "clause" && !block.numbered && (hindi ? "indent-10" : "indent-8"), block.kind === "clause" && block.numbered && "pl-6")} hindi={hindi} onChange={(value) => update(block.id, value)} value={block.text} />
+                    {editing === block.id ? <AutoText className={cn(kindStyles[block.kind], block.center && "text-center", block.kind === "clause" && !block.numbered && (hindi ? "indent-10" : "indent-8"), block.kind === "clause" && block.numbered && "pl-6")} hindi={hindi} onChange={(value) => update(block.id, value)} onDone={() => setEditing(null)} value={block.text} /> : <BlockText className={cn(kindStyles[block.kind], block.center && "text-center", block.kind === "clause" && !block.numbered && (hindi ? "indent-10" : "indent-8"), block.kind === "clause" && block.numbered && "pl-6")} hindi={hindi} onEdit={() => setEditing(block.id)} value={block.text} />}
                   </div>
                   <div className="invisible flex shrink-0 flex-col gap-0.5 pt-1 group-focus-within:visible group-hover:visible">
                     <span className="sr-only">{kindLabels[block.kind]}</span>
@@ -242,11 +300,15 @@ export function DraftStudio({
           </div>
         </section>
 
-        {aiEnabled && chatOpen ? (
-          <aside className="flex max-h-[80vh] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm xl:sticky xl:top-20">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        {aiEnabled && sheet ? <button aria-label="Close assistant" className="fixed inset-0 z-40 bg-primary/40 xl:hidden" onClick={() => setSheet(false)} type="button" /> : null}
+        {aiEnabled ? (
+          <aside aria-label="Drafting assistant" className={cn("flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm xl:sticky xl:top-20 xl:z-auto xl:flex xl:max-h-[calc(100dvh-6rem)]", sheet ? "fixed inset-x-2 bottom-2 z-50 flex h-[80dvh] shadow-2xl xl:static xl:h-auto" : "hidden")}>
+            <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
               <p className="flex items-center gap-2 font-semibold text-primary"><Bot className="size-4 text-accent-foreground" /> Drafting assistant</p>
-              <Button className="h-8" disabled={pending} onClick={review} type="button" variant="outline"><ShieldCheck className="size-4" /> Review</Button>
+              <div className="flex items-center gap-1">
+                <Button className="h-8" disabled={pending} onClick={review} type="button" variant="outline"><ShieldCheck className="size-4" /> Review</Button>
+                <Button aria-label="Close assistant" className="h-8 xl:hidden" onClick={() => setSheet(false)} type="button" variant="ghost"><X className="size-4" /></Button>
+              </div>
             </div>
             <div className="min-h-64 flex-1 space-y-3 overflow-y-auto p-4">
               {!chat.length ? (
