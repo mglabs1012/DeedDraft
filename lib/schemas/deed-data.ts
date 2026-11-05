@@ -38,7 +38,8 @@ export const partySchema = z.object({
   fullName: z.string().trim().min(2, "Enter the full name.").max(160),
   alias: text(160),
   gender: genderSchema.default("male"),
-  relation: relationSchema,
+  // Defaulted, so a stored person without a relation is never silently dropped when the deed loads.
+  relation: relationSchema.default("S/o"),
   relativeName: text(160),
   relativeDeceased: z.boolean().default(false),
   age: optionalNumber,
@@ -307,7 +308,8 @@ const emptyTerms = termsSchema.parse({});
 const emptyExecution = executionSchema.parse({});
 
 export const standardWorkspaceSchema = z.object({
-  mode: z.literal("standard").default("standard"),
+  /** Standard: guided single page. Premium: full sectioned workspace for complex matters. Same data either way. */
+  mode: z.enum(["standard", "premium"]).catch("standard").default("standard"),
   modules: z.object({ naksha: z.boolean().default(false), consideration: z.boolean().default(false) }).default({}),
   processedDocuments: z.array(z.string().uuid()).max(500).default([]),
   documentRoles: z.record(z.enum(["first", "second", "witness", "other"])).default({}),

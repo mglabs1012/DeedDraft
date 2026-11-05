@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { deleteDeed, duplicateDeed } from "@/app/actions/deeds";
 import { StatusBadge, TypeBadge } from "@/components/deeds/badges";
+import { ModeBadge } from "@/components/mode-badge";
 import { deedTypeLabels, statusLabels, type DeedStatus, type DeedType } from "@/lib/deeds";
 import type { DeedSummary as Deed } from "@/types/database";
 
@@ -44,7 +45,7 @@ export function DeedsTable({ deeds, initialQuery = "", initialStatus }: Props) {
   const columns = useMemo<ColumnDef<Deed>[]>(() => [
     { accessorKey: "reference_no", header: "Reference", cell: ({ row }) => <span className="font-mono text-xs font-semibold text-primary">{row.original.reference_no}</span> },
     { accessorKey: "title", header: "Title", cell: ({ row }) => <Link className="font-medium text-foreground hover:text-primary hover:underline" href={"/app/deeds/" + row.original.id}>{row.original.title}</Link> },
-    { accessorKey: "deed_type", header: "Type", cell: ({ row }) => <TypeBadge type={row.original.deed_type} /> },
+    { accessorKey: "deed_type", header: "Type", cell: ({ row }) => <span className="flex flex-wrap items-center gap-1.5"><TypeBadge type={row.original.deed_type} />{row.original.mode === "premium" ? <ModeBadge mode="premium" /> : null}</span> },
     { accessorKey: "status", header: "Status", cell: ({ row }) => <StatusBadge status={row.original.status} /> },
     { accessorKey: "updated_at", header: "Updated", cell: ({ row }) => <span className="text-muted-foreground">{format(new Date(row.original.updated_at), "d MMM yyyy")}</span> },
     {
@@ -102,7 +103,7 @@ export function DeedsTable({ deeds, initialQuery = "", initialStatus }: Props) {
               <Link className="min-w-0 flex-1" href={"/app/deeds/" + deed.id}>
                 <p className="font-mono text-xs font-semibold text-muted-foreground">{deed.reference_no}</p>
                 <p className="mt-0.5 font-semibold leading-5 text-primary">{deed.title}</p>
-                <div className="mt-2 flex flex-wrap items-center gap-1.5"><TypeBadge type={deed.deed_type} /><StatusBadge status={deed.status} /><span className="text-xs text-muted-foreground">{format(new Date(deed.updated_at), "d MMM yyyy")}</span></div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5"><TypeBadge type={deed.deed_type} />{deed.mode === "premium" ? <ModeBadge mode="premium" /> : null}<StatusBadge status={deed.status} /><span className="text-xs text-muted-foreground">{format(new Date(deed.updated_at), "d MMM yyyy")}</span></div>
               </Link>
               <div className="flex shrink-0 flex-col">
                 <button aria-label={"Duplicate " + deed.title} className="rounded-md p-2 text-muted-foreground hover:bg-secondary" disabled={pending} onClick={() => duplicate(deed)}><Copy className="size-4" /></button>

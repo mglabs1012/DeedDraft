@@ -19,6 +19,7 @@ export const createDeedSchema = z.object({
   remarks: z.string().trim().max(4000).optional().or(z.literal("")),
   /** Library template id when the deed starts from the template library. */
   templateId: z.string().trim().max(120).optional(),
+  mode: z.enum(["standard", "premium"]).default("standard"),
 });
 
 export const updateDeedTitleSchema = z.object({

@@ -51,6 +51,8 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
       data: {
         ...emptyDeedData(),
         execution: { ...emptyDeedData().execution, mapAttached: false },
+        // Premium works on structured facts; library templates are AI-written documents, so they stay in Standard.
+        workspace: { ...emptyDeedData().workspace, mode: template ? "standard" : parsed.data.mode },
         ...(template ? { custom: { templateId: template.id, title: template.title, answers: {}, drafts: {} } } : {}),
       } as unknown as Json,
     })
@@ -64,7 +66,7 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
     deed_id: data.id,
     user_id: workspace.user.id,
     action: "created_deed",
-    details: { reference_no: data.reference_no, deed_type: template ? "other" : parsed.data.deedType, ...(template ? { template: template.title } : {}) },
+    details: { reference_no: data.reference_no, deed_type: template ? "other" : parsed.data.deedType, mode: template ? "standard" : parsed.data.mode, ...(template ? { template: template.title } : {}) },
   });
 
   revalidatePath("/app/dashboard");

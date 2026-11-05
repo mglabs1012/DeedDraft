@@ -6,9 +6,10 @@ import { AI_NOT_CONFIGURED, AiError, MAX_DOCUMENTS_PER_REQUEST, aiModel, fileBlo
 import { aiAllowance } from "@/lib/ai/guard.server";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { identityWarnings, normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, type Extraction, type ReviewIssue } from "@/lib/ai/parse";
-import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt } from "@/lib/ai/prompts";
+import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "@/lib/ai/prompts";
 import { relevantFacts } from "@/lib/ai/facts";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
+import { getReadiness } from "@/lib/drafting";
 import { draftForAi, editableDraftSchema, validOperations, type EditOperation } from "@/lib/drafting/editable";
 import { readDocument, type ReadResult } from "@/lib/ocr/read";
 import { parseDeedData, type DeedData, type Party, type Property } from "@/lib/schemas/deed-data";
@@ -211,6 +212,50 @@ export async function draftClauses(input: unknown): Promise<Result<{ clauses: st
     if (!clauses.length) return { error: "The AI did not return any clauses. Try more specific instructions." };
     await logUsage(workspace, deed.id, "ai_drafted_clauses", usage, { count: clauses.length });
     return { clauses };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/* ---------------------------------------------------------------- Review */
+
+/** Premium overview: an advocate-style review of the matter facts before drafting. */
+export async function reviewDeed(input: unknown): Promise<Result<{ issues: ReviewIssue[] }>> {
+  const parsed = z.object({ deedId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid request." };
+  if (!isAiConfigured()) return { error: AI_NOT_CONFIGURED };
+
+  const { workspace, deed } = await loadDeed(parsed.data.deedId);
+  if (!deed) return { error: "Deed not found." };
+  const limited = await aiAllowance(workspace);
+  if (limited) return { error: limited };
+
+  const data = parseDeedData(deed.data);
+
+  try {
+    const [memory, { count: documentCount }] = await Promise.all([
+      draftingContext(workspace, deed.deed_type, deed.language === "english" ? "english" : "hindi", { references: false }),
+      workspace.supabase.from("deed_documents").select("id", { count: "exact", head: true }).eq("deed_id", deed.id),
+    ]);
+    const { data: raw, usage } = await generateJson({
+      temperature: 0,
+      system: reviewPrompt(deed.deed_type),
+      cachedContext: memory.text || undefined,
+      schema: reviewSchema,
+      name: "save_review",
+      description: "Save the review findings",
+      content: JSON.stringify({
+        deedType: deed.deed_type,
+        draftLanguage: deed.language,
+        clientRemarks: deed.remarks ?? "",
+        uploadedDocuments: documentCount ?? 0,
+        checklist: getReadiness(deed.deed_type, data, documentCount ?? 0).filter((item) => !item.done).map((item) => item.label),
+        matter: redact(data, deed.deed_type),
+      }),
+    });
+    const issues = normaliseReview(raw);
+    await logUsage(workspace, deed.id, "ai_reviewed_deed", usage, { issues: issues.length });
+    return { issues };
   } catch (error) {
     return failure(error);
   }

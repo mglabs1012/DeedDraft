@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import type { ReviewIssue } from "@/lib/ai/parse";
 import type { DraftLanguage } from "@/lib/deed-types";
 import { renderBlock, renderDraftHtml } from "@/lib/drafting/blocks";
+import { safeFileName } from "@/lib/drafting/transliterate";
 import { applyOperations, fromEditable, markupToHtml, type EditableBlock, type EditableDraft, type EditOperation, type TextKind } from "@/lib/drafting/editable";
 import { cn } from "@/lib/utils";
 
@@ -110,6 +111,7 @@ export function DraftStudio({
   const [message, setMessage] = useState("");
   const [highlight, setHighlight] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   // Narrow screens: the assistant opens as a bottom sheet; wide screens always show it beside the draft.
   const [sheet, setSheet] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -231,12 +233,20 @@ export function DraftStudio({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
         {exportTitle ? <>
-          <Button variant="outline" type="button" className="h-9" onClick={() => {
-            const html = renderDraftHtml({ title: exportTitle, documents: [fromEditable(draft)], footer: "Draft for review" });
-            const url = URL.createObjectURL(new Blob(["\ufeff", html], { type: "application/msword" }));
-            const a = document.createElement("a"); a.href = url; a.download = exportTitle.replace(/[<>:"/\\|?*]/g, "-") + ".doc"; a.click();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-          }}><FileDown className="size-4" /> Word</Button>
+          <Button variant="outline" type="button" className="h-9" disabled={exporting} onClick={() => {
+            setExporting(true);
+            // A real .docx (A4, justified, numbered clauses, bordered tables, page numbers), built in the browser.
+            void import("@/lib/drafting/docx")
+              .then(({ draftToDocxBlob }) => draftToDocxBlob([fromEditable(draft)], { title: exportTitle, footer: exportTitle + " · draft for advocate review" }))
+              .then((blob) => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a"); a.href = url; a.download = safeFileName(exportTitle + (hindi ? " - Hindi" : " - English")) + ".docx";
+                document.body.append(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+              })
+              .catch(() => toast.error("The Word file could not be created. Try Print / PDF instead."))
+              .finally(() => setExporting(false));
+          }}>{exporting ? <LoaderCircle className="size-4 animate-spin" /> : <FileDown className="size-4" />} Word</Button>
           <Button variant="outline" type="button" className="h-9" onClick={() => {
             const win = window.open("", "_blank");
             if (!win) return toast.error("Allow pop-ups to print or save as PDF.");

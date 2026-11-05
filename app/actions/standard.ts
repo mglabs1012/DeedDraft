@@ -52,6 +52,16 @@ export async function toggleStandardModule(input: unknown): Promise<Result> {
   }));
 }
 
+/** Opens the same deed in the other workspace. Nothing in the deed's facts changes. */
+export async function setDeedMode(input: unknown): Promise<Result> {
+  const parsed = z.object({ id: z.string().uuid(), mode: z.enum(["standard", "premium"]) }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid mode." };
+  return mutate(parsed.data.id, (data) => {
+    if (parsed.data.mode === "premium" && data.custom) throw new Error("Documents made from a library template stay in Standard Mode.");
+    return { workspace: standardWorkspaceSchema.parse({ ...data.workspace, mode: parsed.data.mode }) };
+  });
+}
+
 export async function assignDocumentRoles(input: unknown): Promise<Result> {
   const parsed = z.object({ id: z.string().uuid(), documentIds: z.array(z.string().uuid()).max(30), role: z.enum(["first", "second", "witness", "other"]) }).safeParse(input);
   if (!parsed.success) return { error: "Invalid document role." };

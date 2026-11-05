@@ -240,3 +240,21 @@ export function convertOffline(value: string, language: DraftLanguage): OfflineC
 export function isShortValue(value: string) {
   return value.trim().split(/\s+/).length <= 8 && !/[।.?!]\s+\S/.test(value.trim());
 }
+
+/**
+ * A download name every browser and operating system accepts: Hindi words are
+ * written in English letters, dashes and other symbols are simplified. Chrome
+ * silently replaces names it rejects with "download" (no extension).
+ */
+export function safeFileName(name: string, fallback = "deed") {
+  const roman = DEVANAGARI.test(name) ? convertOffline(name, "english").text : name;
+  const clean = roman
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/[^A-Za-z0-9 ,._()&-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[ .-]+|[ .-]+$/g, "")
+    .slice(0, 100)
+    .trim();
+  return clean || fallback;
+}

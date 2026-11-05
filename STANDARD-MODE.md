@@ -3,10 +3,17 @@
 ## Guided first-use tutorial
 
 - On first visiting the signed-in Home, template picker, workspace and draft view, a short spotlight tour explains that screen. Next, Back, Got it, Skip tutorial and Escape are supported.
-- Skip stops automatic tours. Quick tour in the header replays the current screen's guide. Preferences are per user in this browser's local storage, not synced between devices. Clearing browser storage resets them; blocked storage falls back to in-memory behavior.
+- Guides open by themselves only for a new account (created within the last 14 days), once per screen. Existing users are never interrupted. Skip stops automatic guides permanently; Quick tour in the header still replays the current screen's guide. Preferences are saved to the user's account (Supabase `user_metadata.tour`) and merged with this browser's local copy, so they follow the user across devices.
 - Small question-mark controls provide hover, keyboard-focus and tap help for uploads, optional modules and drafting instructions. Escape dismisses help.
 - The walkthrough never creates a deed, selects a template, uploads papers or invokes AI. Those actions remain explicit user choices. Legal review reminders appear before drafting and exporting.
 - Browser verification used an isolated synthetic preview (removed after testing), because the preview browser was signed out. Verified auto-start, Next/Back, completion persistence, next-screen guidance, Escape/Skip persistence, replay and tap help. Signed-in integration still needs a user smoke test.
+
+## November 5 pass: Premium Mode, Word export, fixes
+
+- **Premium Mode** (`data.workspace.mode = "premium"`): chosen on Home or on New deed (`/app/deeds/new?mode=premium`, core deed types only; library templates stay Standard). The deed opens in a sectioned workspace with a sidebar (scrolling tabs on phones): Overview → Papers → People → Property → Title history → Payments → Terms → Draft. Payments and Title history are hidden when the deed type has none. The active section is kept in the URL (`?tab=`), each section shows complete/needs-details status, and Previous/Next move through them. The Overview has a readiness bar, checklist, key facts, final checks and an **AI legal review** whose findings link to the section to fix. *Open in Standard/Premium* switches a deed's mode without losing data. Both modes share one workspace hook, so uploads, extraction, saving and drafting behave identically. Deed lists show a Premium badge.
+- **Word export** is now a real `.docx` (the `docx` package): A4, registry margins, justified 1.5-line text, centred headings, numbered clauses, bordered boundary and rent tables with fixed column widths, side-by-side signature blocks, page numbers, and a Devanagari font for Hindi. Each language starts its own section. File names are made download-safe (Hindi is written in English letters; em dashes are replaced) because browsers renamed such downloads to "download".
+- **People cards:** long file names and IDs no longer push the edit/delete buttons out of the card (grid columns are `minmax(0,1fr)` with truncation). A name that already has an honorific (श्रीमती, कुमारी, Dr. …) is not given a second one, and an unmarried woman is सुश्री/Ms.
+- **Data fixes:** a stored person without a relation was silently dropped on load; it now defaults to S/o. Doubled full stops ("sq. ft..") in areas and release recitals are fixed.
 
 ## November 4 debugging pass
 

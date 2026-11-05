@@ -91,10 +91,16 @@ const hindiSalutations = { shri: "श्री", smt: "श्रीमती", s
 const englishSalutations = { shri: "Shri", smt: "Smt.", sushri: "Ms.", kumari: "Kumari", none: "" } as const;
 const hindiRelations = { "S/o": "पुत्र", "D/o": "पुत्री", "W/o": "पत्नी", "C/o": "द्वारा" } as const;
 
+/** A name typed with its own honorific ("कुमारी भारती", "Dr. Mehta", "M/s ...") gets no automatic one. */
+const OWN_HONORIFIC = /^(?:श्री|श्रीमती|सुश्री|कुमारी|कु\.|डॉ\.?|स्व\.|shri|sri|smt|mr|mrs|ms|miss|kumari|km|dr|late|m\/s)(?:\.|\s|$)/i;
+
 export function salutation(party: Party, lang: "hindi" | "english") {
   const table = lang === "hindi" ? hindiSalutations : englishSalutations;
   if (party.salutation && party.salutation !== "auto") return table[party.salutation];
-  return isFemale(party) ? table.smt : table.shri;
+  if (OWN_HONORIFIC.test(party.fullName.trim())) return "";
+  // A daughter described as D/o is usually unmarried: सुश्री / Ms., not श्रीमती / Smt.
+  if (isFemale(party)) return party.relation === "D/o" ? table.sushri : table.smt;
+  return table.shri;
 }
 
 export function displayName(party: Party, lang: "hindi" | "english") {
