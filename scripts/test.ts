@@ -9,13 +9,14 @@ import { mergeExtraction } from "../lib/ai/contract";
 import { normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, parseJsonResponse, toIsoDate, toNumber } from "../lib/ai/parse";
 import { clausePrompt, extractionPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "../lib/ai/prompts";
 import { deedTypeOrder, deedTypes } from "../lib/deed-types";
-import { buildDraft, buildDraftDocuments, draftChoices, generateEditable, getReadiness, rentSchedule } from "../lib/drafting";
+import { buildDraft, draftChoices, generateEditable, getReadiness, rentSchedule } from "../lib/drafting";
 import { blockTexts, coveredTopics, repeatedTopics, topics } from "../lib/drafting/boilerplate";
 import { clauseChecks } from "../lib/drafting/checks";
 import { clauseLibrary } from "../lib/drafting/clause-library";
 import { footerGroups, legalDocs } from "../lib/legal";
 import { dedupeBlocks, dedupeEditable, isSameClause } from "../lib/drafting/dedupe";
-import { applyOperations, draftForAi, editableDraftSchema, markupToHtml, validOperations } from "../lib/drafting/editable";
+import { applyOperations, draftForAi, editableDraftSchema, fromEditable, markupToHtml, validOperations } from "../lib/drafting/editable";
+import { draftBasis } from "../lib/drafting/basis";
 import { areaTriple, hindiTerm, moneyHi } from "../lib/drafting/format";
 import { hindiLongDate, hindiWords, termEndDate } from "../lib/drafting/hindi";
 import { assessPages, assessText } from "../lib/ocr/quality";
@@ -29,9 +30,10 @@ import { formFields, formFor, labelledAnswers } from "../lib/templates/forms";
 import { customDraftHtml, textToParagraphs } from "../lib/templates/render";
 
 import { createRedactor } from "../lib/ai/redact";
+import { rejectedFeature, retryWithoutReasoning } from "../lib/ai/compat";
 import { html, renderDraftHtml } from "../lib/drafting/blocks";
 import { convertText, localizeData, needsConversion, pendingConversions } from "../lib/drafting/localize";
-import { applyEdits, blockSegments, hashSegments, keepsParticulars } from "../lib/drafting/segments";
+import { keepsParticulars } from "../lib/drafting/particulars";
 import { isValidAadhaar, verhoeffDigit } from "../lib/text/aadhaar";
 
 import { takeSlot } from "../lib/ai/rate-window";
@@ -376,24 +378,7 @@ test("Script conversion: only values in the other script, codes kept, multi-line
   assert.ok(html.includes("केसर देवी") && !html.includes("Kesar Devi"));
 });
 
-test("AI refinement: segments, edits, stale detection and number safety", () => {
-  const [doc] = buildDraftDocuments({ type: "sale", title: "T", referenceNo: "DD-1", data: sample, firmName: "Firm", firmCity: "Ajmer" }, "hindi");
-  const segments = blockSegments(doc.blocks);
-  assert.ok(segments.length > 10);
-  const hash = hashSegments(segments);
-  assert.equal(hashSegments(blockSegments(buildDraftDocuments({ type: "sale", title: "T", referenceNo: "DD-1", data: sample, firmName: "Firm", firmCity: "Ajmer" }, "hindi")[0].blocks)), hash, "same matter, same hash");
-  const changed = parseDeedData({ ...sample, consideration: { ...sample.consideration, total: 999999 } });
-  assert.notEqual(hashSegments(blockSegments(buildDraftDocuments({ type: "sale", title: "T", referenceNo: "DD-1", data: changed, firmName: "Firm", firmCity: "Ajmer" }, "hindi")[0].blocks)), hash, "edited matter invalidates the refinement");
-  const target = segments.find((segment) => segment.item !== undefined)!;
-  const out = blockSegments(applyEdits(doc.blocks, [
-    { op: "replace", index: target.index, text: "नया <b>पाठ</b>" },
-    { op: "insert_after", index: target.index, text: "जोड़ा गया खण्ड" },
-  ]));
-  assert.equal(out.length, segments.length + 1);
-  assert.equal(out[target.index].text, "नया <b>पाठ</b>", "edited text is escaped, not markup");
-  assert.equal(out[target.index + 1].text, "जोड़ा गया खण्ड");
-  assert.equal(blockSegments(applyEdits(doc.blocks, [{ op: "delete", index: target.index }])).length, segments.length - 1);
-  assert.ok(renderDraftHtml({ title: "x", documents: [{ language: "hindi", blocks: applyEdits(doc.blocks, [{ op: "replace", index: target.index, text: "<script>x</script>" }]) }] }).includes("&lt;script&gt;"));
+test("AI wording changes must keep every number", () => {
   assert.ok(keepsParticulars("राशि 4,50,000/- दिनांक 05.10.2026", "रूपये 450000/- दिनांक 05.10.2026 को"));
   assert.ok(!keepsParticulars("राशि 4,50,000/-", "राशि 4,05,000/-"));
 });
@@ -420,6 +405,27 @@ test("Editable draft round-trips to the same output", () => {
   }
 });
 
+test("Draft basis: same facts give the same fingerprint; corrected facts change it", () => {
+  const input = { type: "sale" as const, title: "T", referenceNo: "R", data: sample, firmName: "F", firmCity: "Ajmer" };
+  const basis = draftBasis(input);
+  assert.equal(generateEditable(input, "hindi").basis, basis, "generated drafts carry their basis");
+  // Key order and upload/workspace changes do not matter.
+  const reordered = Object.fromEntries(Object.entries(sample).reverse()) as DeedData;
+  assert.equal(draftBasis({ ...input, data: { ...reordered, workspace: { ...sample.workspace, processedDocuments: ["x"] } } }), basis);
+  assert.notEqual(draftBasis({ ...input, data: { ...sample, parties: sample.parties.map((party, index) => (index ? party : { ...party, age: (party.age ?? 30) + 1 })) } }), basis, "a corrected age");
+  assert.notEqual(draftBasis({ ...input, title: "Renamed" }), basis, "a renamed deed");
+});
+
+test("Edited structured blocks keep bold text and survive the save schema", () => {
+  const draft = generateEditable({ type: "rent", title: "T", referenceNo: "R", data: sample, firmName: "F", firmCity: "Ajmer" }, "english");
+  const table = draft.blocks.find((block) => block.kind === "locked" && block.block.t === "table");
+  assert.ok(table && table.kind === "locked" && table.block.t === "table");
+  const edited = { ...table.block, rows: [...table.block.rows, ["**Parking**", "One car"]] };
+  const rendered = renderDraftHtml({ title: "x", documents: [fromEditable({ ...draft, blocks: [{ id: "t", kind: "locked", block: edited }] })] });
+  assert.ok(rendered.includes("<strong>Parking</strong>") && !rendered.includes("**"));
+  assert.ok(editableDraftSchema.safeParse({ ...draft, blocks: [...draft.blocks, { id: "t2", kind: "locked", block: { t: "signatures", items: [{ label: "Witness", lines: ["Name", "Address"] }] } }] }).success);
+});
+
 test("Draft edits: only valid operations on editable blocks apply", () => {
   const draft = generateEditable({ type: "sale", title: "T", referenceNo: "R", data: sample, firmName: "F", firmCity: "Ajmer" }, "hindi");
   const clause = draft.blocks.find((block) => block.kind === "clause")!;
@@ -438,6 +444,38 @@ test("Draft edits: only valid operations on editable blocks apply", () => {
   const index = edited.blocks.findIndex((block) => block.id === clause.id);
   assert.equal((edited.blocks[index] as { text: string }).text, "यह कि **नया** खण्ड।");
   assert.equal((edited.blocks[index + 1] as { text: string }).text, "यह कि जोड़ा गया खण्ड।");
+});
+
+test("AI edits that change numbers the advocate did not mention are flagged", () => {
+  const draft = { language: "hindi" as const, blocks: [{ id: "a", kind: "clause" as const, text: "यह कि राशि 4,50,000/- दिनांक 02.09.2026 को दी गई।" }, { id: "t", kind: "locked" as const, block: { t: "pagebreak" as const } }] };
+  const [changed] = validOperations(draft, [{ op: "replace", id: "a", text: "यह कि राशि 4,05,000/- दी गई।" }], "भाषा सुधारें");
+  assert.ok(changed.warning, "dropped date and changed amount are flagged");
+  const [asked] = validOperations(draft, [{ op: "replace", id: "a", text: "यह कि राशि 5,00,000/- दिनांक 02.09.2026 को दी गई।" }], "राशि 4,50,000 को 5,00,000 करें");
+  assert.equal(asked.warning, undefined, "a change the advocate asked for is not flagged");
+  const [reworded] = validOperations(draft, [{ op: "replace", id: "a", text: "यह कि रूपये 450000/- दिनांक 02.09.2026 को अदा किये गये।", warning: "AI-set" }]);
+  assert.equal(reworded.warning, undefined, "same numbers, new wording; AI cannot set its own warning");
+  assert.ok(draftForAi(draft).includes("(locked, read-only) page break"));
+});
+
+test("Identity numbers go to the AI as tokens and come back unchanged", () => {
+  const ids = createRedactor();
+  const sent = ids.redact("[b3] (para) Aadhaar No. 5363 4675 6192, PAN DJKPG9076C");
+  assert.ok(!sent.includes("5363") && !sent.includes("DJKPG9076C"));
+  assert.equal(ids.restore(sent.replace("(para)", "(clause)")), "[b3] (clause) Aadhaar No. 5363 4675 6192, PAN DJKPG9076C");
+});
+
+test("AI client drops only the request option a model rejects", () => {
+  const validation = (message: string) => Object.assign(new Error(message), { name: "ValidationException" });
+  const all = new Set(["thinking", "effort", "forcedTool", "temperature"] as const);
+  assert.equal(rejectedFeature(validation("output_config.effort is not supported"), new Set(all)), "effort");
+  assert.equal(rejectedFeature(validation("thinking: adaptive is not supported on this model"), new Set(all)), "thinking");
+  assert.equal(rejectedFeature(validation("tool_choice: type \"tool\" is not supported for this model"), new Set(["forcedTool", "temperature"] as const)), "forcedTool");
+  assert.equal(rejectedFeature(validation("temperature is deprecated for this model"), new Set(["temperature"] as const)), "temperature");
+  assert.equal(rejectedFeature(validation("Input is too long"), new Set(["temperature"] as const)), null, "an unrelated rejection is reported, not retried");
+  assert.equal(rejectedFeature(validation("Malformed request"), new Set(["thinking", "effort"] as const)), null);
+  assert.ok(retryWithoutReasoning(validation("Malformed request"), new Set(["thinking", "effort"] as const)), "an unexplained rejection while reasoning is retried once as a normal answer");
+  assert.ok(!retryWithoutReasoning(validation("Malformed request"), new Set(["temperature"] as const)));
+  assert.equal(rejectedFeature(Object.assign(new Error("temperature"), { name: "ThrottlingException" }), new Set(all)), null);
 });
 
 test("Draft markup escapes HTML and keeps bold", () => {
@@ -621,6 +659,9 @@ test("Offline conversion: dictionary names, places, phrases and codes", () => {
   assert.equal(hi("B-204, Vaishali Nagar").text, "B-204, वैशाली नगर", "codes stay as typed");
   assert.equal(hi("SBI").text, "SBI");
   assert.equal(hi("Near Hanuman Temple").confident, false, "unknown words go to the AI");
+  assert.equal(hi("Ajmer (I)").text, "अजमेर (प्रथम)", "a Roman numeral in brackets is an office number");
+  assert.equal(hi("Sub-Registrar, Jaipur (II)").text, "उप पंजीयक, जयपुर (द्वितीय)");
+  assert.equal(hi("Phase II").text.endsWith("II"), true, "other Roman numerals stay as typed");
   const en = (value: string) => convertOffline(value, "english");
   assert.deepEqual(en("मंजू देवी"), { text: "Manju Devi", confident: true });
   assert.deepEqual(en("आम रास्ता"), { text: "Public road", confident: true });

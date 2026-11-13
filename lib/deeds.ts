@@ -1,4 +1,4 @@
-import { deedTypeOrder, deedTypes, getDeedType, type DeedType } from "@/lib/deed-types";
+import { deedTypeOrder, deedTypes, type DeedType } from "@/lib/deed-types";
 import type { Database } from "@/types/database";
 
 export type { DeedType } from "@/lib/deed-types";
@@ -8,46 +8,12 @@ export type DocumentCategory = Database["public"]["Enums"]["document_category"];
 
 export const deedTypeLabels = Object.fromEntries(deedTypeOrder.map((type) => [type, deedTypes[type].label])) as Record<DeedType, string>;
 
-export const deedTypeDescriptions = Object.fromEntries(
-  deedTypeOrder.map((type) => [type, deedTypes[type].labelHi + " / " + deedTypes[type].description]),
-) as Record<DeedType, string>;
-
-export const partyRoleLabels = Object.fromEntries(
-  deedTypeOrder.map((type) => [type, Object.fromEntries(Object.entries(deedTypes[type].roles).map(([role, def]) => [role, def.en]))]),
-) as Record<DeedType, Record<"first" | "second" | "other" | "witness", string>>;
-
-/** Deed types that carry a monetary consideration. */
-export function hasConsideration(type: DeedType) {
-  return getDeedType(type).consideration !== "none";
-}
-
 export const statusLabels: Record<DeedStatus, string> = {
   draft: "Draft",
   data_collection: "Data collection",
   under_review: "Under review",
   generated: "Generated",
   finalized: "Finalized",
-};
-
-export const documentCategoryLabels: Record<DocumentCategory, string> = {
-  prior_title_deed: "Prior title deed",
-  patta: "Patta / lease from authority",
-  jamabandi: "Jamabandi",
-  naksha_map: "Naksha / site plan",
-  id_proof: "ID proof (Aadhaar / PAN)",
-  payment_proof: "Payment proof",
-  loan_papers: "Loan sanction / bank papers",
-  stamp_paper: "e-Stamp / stamp paper",
-  photograph: "Photograph",
-  other: "Other",
-};
-
-export const documentCategories = Object.keys(documentCategoryLabels) as DocumentCategory[];
-
-export const languageLabels: Record<DeedLanguage, string> = {
-  english: "English",
-  hindi: "Hindi",
-  bilingual: "Bilingual",
 };
 
 export const propertyKindLabels = {
@@ -150,44 +116,6 @@ export const instrumentHindi: Record<keyof typeof instrumentLabels, string> = {
   inheritance: "उत्तराधिकार",
   other: "विलेख",
 };
-
-export const activityLabels: Record<string, string> = {
-  created_deed: "Deed created",
-  updated_title: "Title updated",
-  changed_status: "Status changed",
-  updated_remarks: "Remarks updated",
-  duplicated_deed: "Deed duplicated",
-  deleted_deed: "Deed deleted",
-  uploaded_document: "Document uploaded",
-  recategorized_document: "Document recategorised",
-  deleted_document: "Document deleted",
-  updated_parties: "Parties updated",
-  updated_properties: "Properties updated",
-  updated_titleChain: "Chain of title updated",
-  updated_payments: "Payments updated",
-  updated_consideration: "Consideration updated",
-  updated_terms: "Terms updated",
-  updated_execution: "Execution details updated",
-  updated_firm_settings: "Firm settings updated",
-  updated_profile: "Profile updated",
-  seeded_demo_deed: "Demo deed added",
-  ai_extracted_document: "AI extracted a document",
-  ai_drafted_clauses: "AI drafted clauses",
-  ai_read_document: "AI read a document (OCR)",
-  ai_chat_draft: "Edited the draft with AI chat",
-  ai_reviewed_draft: "AI reviewed the draft",
-  saved_draft_version: "Saved a draft version",
-  ai_reviewed_deed: "AI reviewed the matter",
-  ai_filled_party: "AI filled a party from ID papers",
-  ai_filled_property: "AI filled a property from its papers",
-  updated_custom_details: "Document details updated",
-  edited_custom_draft: "Draft text edited",
-  ai_drafted_document: "AI prepared the draft",
-};
-
-export function activityLabel(action: string) {
-  return activityLabels[action] ?? action.replaceAll("_", " ");
-}
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 2 });
 

@@ -2,6 +2,7 @@ export type TourStep = { target: string; title: string; text: string };
 export const tours: Record<string, { label: string; steps: TourStep[] }> = {
   home: { label: "Getting started", steps: [
     { target: "standard-mode", title: "Your first deed starts here", text: "Choose Start a new deed, or one of the common documents below it. You will pick a template, upload papers, check the details and prepare a draft. No legal drafting experience is needed to follow the steps." },
+    { target: "premium-mode", title: "Complex matter? Use Premium", text: "Premium Mode puts every part of the deed in its own section — papers, people, property, title history, payments and terms — with a readiness checklist and an AI legal review. You can switch any deed between the two modes later." },
     { target: "recent-deeds", title: "Come back to saved work", text: "Recent deeds appear here. My deeds in the top menu shows all your matters. Open an existing deed to continue; you do not need to start again." },
     { target: "quick-tour", title: "Help is always here", text: "Use Quick tour to repeat the guide for the screen you are on. Small question-mark buttons give extra help when you hover, focus or tap them. Next, choose Start a new deed." },
   ] },
@@ -19,6 +20,11 @@ export const tours: Record<string, { label: string; steps: TourStep[] }> = {
     { target: "draft-instructions", title: "6. Explain what you want", text: "Write simple instructions: “Keep the title history. Add that possession is given at registration.” Say which clauses to add, keep or remove, and choose Hindi or English. Instructions do not replace missing facts." },
     { target: "prepare-draft", title: "7. Prepare, then review", text: "Once papers are saved and details checked, choose Prepare draft. Live stages show progress and Stop drafting lets you cancel. Review the finished draft and missing details with a qualified advocate before signing or registration." },
   ] },
+  premium: { label: "Premium workspace", steps: [
+    { target: "premium-nav", title: "Every section in one place", text: "Work through the sections in order or jump to any of them. A tick means the required details are complete; an amber dot means something is still missing." },
+    { target: "premium-overview", title: "Know what is missing", text: "The overview shows how ready the deed is, the checks to fix before signing, and an AI legal review of the facts. Click any item to go straight to it." },
+    { target: "mode-switch", title: "Switch modes any time", text: "Open the same deed in Standard Mode for the single guided page. Your papers and details stay exactly as they are." },
+  ] },
   draft: { label: "Review your draft", steps: [
     { target: "draft-review", title: "Read before you use it", text: "Check names, property boundaries, amounts, dates and every clause against the papers. Resolve blank fields and review warnings. This is a draft, not a guarantee of legal validity." },
     { target: "draft-review", title: "Make changes and save a version", text: "Edit the draft directly or ask the assistant to propose changes. Review and apply its suggestions, then save a version. If you change the matter details in Papers & details, prepare a new draft to include those changes." },
@@ -26,9 +32,29 @@ export const tours: Record<string, { label: string; steps: TourStep[] }> = {
   ] },
 };
 export type TourPreferences = { skipped: boolean; completed: string[] };
+
+/** Accepts stored preferences in any shape (account metadata or browser storage) and keeps only known screens. */
+export function normaliseTourPreferences(value: unknown): TourPreferences {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return {
+    skipped: record.skipped === true,
+    completed: Array.isArray(record.completed) ? [...new Set(record.completed.filter((key: unknown): key is string => typeof key === "string" && Object.hasOwn(tours, key)))] : [],
+  };
+}
+
 export function parseTourPreferences(raw: string | null): TourPreferences {
-  try {
-    const value = JSON.parse(raw ?? "{}");
-    return { skipped: value?.skipped === true, completed: Array.isArray(value?.completed) ? value.completed.filter((key: unknown) => typeof key === "string" && Object.hasOwn(tours, key)) : [] };
-  } catch { return { skipped: false, completed: [] }; }
+  try { return normaliseTourPreferences(JSON.parse(raw ?? "{}")); }
+  catch { return { skipped: false, completed: [] }; }
+}
+
+export function mergeTourPreferences(a: TourPreferences, b: TourPreferences): TourPreferences {
+  return { skipped: a.skipped || b.skipped, completed: [...new Set([...a.completed, ...b.completed])] };
+}
+
+/** Guides start by themselves only while an account is new (and never after Skip); Quick tour always replays. */
+export const NEW_ACCOUNT_DAYS = 14;
+export function autoTourAllowed(prefs: TourPreferences, accountCreatedAt: string | undefined, now = Date.now()) {
+  if (prefs.skipped) return false;
+  const created = accountCreatedAt ? Date.parse(accountCreatedAt) : NaN;
+  return Number.isFinite(created) && now - created <= NEW_ACCOUNT_DAYS * 86_400_000;
 }

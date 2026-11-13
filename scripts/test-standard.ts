@@ -9,7 +9,7 @@ import { normalizeUpload } from "../lib/uploads/normalize";
 import { checkEntry, MAX_EXPANDED_BYTES, MAX_UPLOAD_BYTES, safeArchiveName } from "../lib/uploads/policy";
 import { uploadPaths } from "../lib/uploads/paths";
 import { signedUploadEndpoint } from "../lib/uploads/mime";
-import { tours, parseTourPreferences } from "../lib/onboarding";
+import { autoTourAllowed, mergeTourPreferences, normaliseTourPreferences, tours, parseTourPreferences } from "../lib/onboarding";
 
 function crc32(bytes: Buffer) {
   let crc = 0xffffffff;
@@ -74,6 +74,17 @@ async function main() {
       assert.ok(tour.steps.length >= 2);
       for (const step of tour.steps) assert.ok(step.title && step.text && /^[a-z-]+$/.test(step.target));
     }
+  });
+  await test("Smart tour: automatic only for new accounts, never after Skip, merged across devices", () => {
+    const now = Date.parse("2026-11-05T10:00:00Z");
+    const fresh = { skipped: false, completed: [] };
+    assert.equal(autoTourAllowed(fresh, "2026-11-01T10:00:00Z", now), true, "new account");
+    assert.equal(autoTourAllowed(fresh, "2026-09-01T10:00:00Z", now), false, "existing user is not interrupted");
+    assert.equal(autoTourAllowed(fresh, undefined, now), false, "unknown age: no automatic tour");
+    assert.equal(autoTourAllowed({ skipped: true, completed: [] }, "2026-11-04T10:00:00Z", now), false, "skip is permanent");
+    assert.deepEqual(mergeTourPreferences({ skipped: true, completed: ["home"] }, { skipped: false, completed: ["home", "workspace"] }), { skipped: true, completed: ["home", "workspace"] });
+    assert.deepEqual(normaliseTourPreferences({ completed: ["premium", "nope"] }), { skipped: false, completed: ["premium"] });
+    assert.deepEqual(normaliseTourPreferences(undefined), { skipped: false, completed: [] });
   });
   await test("Resumable source and converted files match deployed three-part Storage RLS", () => {
     const firm = "11111111-1111-4111-8111-111111111111";

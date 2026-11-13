@@ -1,4 +1,5 @@
 import "server-only";
+import { createRedactor } from "./redact";
 
 import { aiModel, AiError, fileBlocks, generateJson, pdfTextLayer, type AiUsage, type ContentPart } from "@/lib/ai/claude";
 import { anonymisePrompt, referenceReadPrompt } from "@/lib/ai/prompts";
@@ -68,9 +69,10 @@ export async function readReferenceDraft({ bytes, mimeType, fileName, text }: { 
 
 /** Anonymises a finalised draft from this app before it is stored as a reference. */
 export async function anonymiseDraft(text: string): Promise<{ content: string; usage: AiUsage }> {
+  // Identity numbers never reach the AI; in the stored reference they become blanks.
   const { data, usage } = await generateJson<{ content?: string }>({
     system: anonymisePrompt,
-    content: text.slice(0, 120000),
+    content: createRedactor().redact(text.slice(0, 120000)),
     schema: { type: "object", properties: { content: { type: "string" } }, required: ["content"] },
     name: "save_anonymised",
     description: "Save the anonymised deed text",
@@ -79,7 +81,7 @@ export async function anonymiseDraft(text: string): Promise<{ content: string; u
     temperature: 0,
     timeoutMs: 240_000,
   });
-  const content = (data.content ?? "").trim();
+  const content = (data.content ?? "").replace(/⟦ID\d+⟧/g, "............").trim();
   if (content.length < 200) throw new AiError("The anonymised text came back empty. Please try again.");
   return { content, usage };
 }

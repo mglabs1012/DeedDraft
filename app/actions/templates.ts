@@ -7,12 +7,13 @@ import { aiAllowance } from "@/lib/ai/guard.server";
 import { draftingContext } from "@/lib/ai/memory.server";
 import { saveDeedSection } from "@/lib/deed-sections.server";
 import { templateDraftPrompt } from "@/lib/ai/prompts";
-import { customDraftSchema, parseDeedData, type CustomDoc, type CustomDraft } from "@/lib/schemas/deed-data";
+import { parseDeedData, type CustomDoc, type CustomDraft } from "@/lib/schemas/deed-data";
 import { formFields, labelledAnswers } from "@/lib/templates/forms";
 import { getLibraryEntry, getTemplateText } from "@/lib/templates/library.server";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
 import { assertTaskActive } from "@/lib/ai/task-context";
+import { logActivity } from "@/lib/activity.server";
 
 type Result<T = object> = { error: string } | ({ error?: undefined } & T);
 
@@ -40,7 +41,7 @@ async function loadCustomDeed(id: string) {
 async function saveCustom(workspace: Awaited<ReturnType<typeof requireWorkspace>>, deedId: string, _data: ReturnType<typeof parseDeedData>, custom: CustomDoc, action: string, details: Record<string, Json> = {}) {
   const error = await saveDeedSection(workspace, deedId, "custom", custom);
   if (error) return error;
-  await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, deed_id: deedId, user_id: workspace.user.id, action, details });
+  logActivity(workspace, { deed_id: deedId, action, details });
   return null;
 }
 
@@ -55,16 +56,6 @@ export async function saveCustomAnswers(input: unknown): Promise<Result> {
   const allowed = new Set(formFields(entry).map((item) => item.key));
   const answers = Object.fromEntries(Object.entries(parsed.data.answers).filter(([key, value]) => allowed.has(key) && value.trim()).map(([key, value]) => [key, value.trim()]));
   const error = await saveCustom(workspace, deed.id, data, { ...custom, answers }, "updated_custom_details");
-  return error ? { error } : {};
-}
-
-export async function saveCustomDraft(input: unknown): Promise<Result> {
-  const parsed = z.object({ id: z.string().uuid(), language: languageSchema, draft: customDraftSchema }).safeParse(input);
-  if (!parsed.success) return { error: "The draft is too long to save." };
-  const { workspace, deed, data, custom } = await loadCustomDeed(parsed.data.id);
-  if (!deed || !data || !custom) return { error: "Document not found." };
-  const draft: CustomDraft = { ...parsed.data.draft, paragraphs: parsed.data.draft.paragraphs.map((item) => item.trim()).filter(Boolean), edited: true };
-  const error = await saveCustom(workspace, deed.id, data, { ...custom, drafts: { ...custom.drafts, [parsed.data.language]: draft } }, "edited_custom_draft");
   return error ? { error } : {};
 }
 

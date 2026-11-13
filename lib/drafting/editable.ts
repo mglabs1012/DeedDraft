@@ -9,6 +9,7 @@
 import { z } from "zod";
 
 import { html, SafeHtml, type Block, type DraftDocument } from "./blocks";
+import { numbersIn } from "./particulars";
 
 export type TextKind = "invocation" | "title" | "meta" | "heading" | "para" | "clause" | "detail";
 
@@ -22,7 +23,8 @@ export type LockedBlock =
   | { t: "signatures"; items: Array<{ label: string; lines: string[] }> }
   | { t: "pagebreak" };
 
-export type EditableDraft = { language: "hindi" | "english"; blocks: EditableBlock[] };
+/** `basis`: fingerprint of the matter facts the draft was generated from (see basis.ts). */
+export type EditableDraft = { language: "hindi" | "english"; blocks: EditableBlock[]; basis?: string };
 
 const text = z.string().max(20_000);
 const lockedSchema = z.discriminatedUnion("t", [
@@ -40,6 +42,7 @@ export const editableBlockSchema = z.union([
 export const editableDraftSchema = z.object({
   language: z.enum(["hindi", "english"]),
   blocks: z.array(editableBlockSchema).max(600),
+  basis: z.string().max(40).optional(),
 });
 
 const entities: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
@@ -99,13 +102,18 @@ export function toEditable(doc: DraftDocument): EditableDraft {
   return { language: doc.language, blocks };
 }
 
+/** A structured block ready to render; table cells may carry **bold** after editing. */
+export function lockedToBlock(block: LockedBlock): Block {
+  return block.t === "table" ? { ...block, rows: block.rows.map((row) => row.map((cell) => (cell.includes("**") ? markupToHtml(cell) : cell))) } : block;
+}
+
 /** Rebuilds renderable Blocks, grouping consecutive clauses and detail items. */
 export function fromEditable(draft: EditableDraft): DraftDocument {
   const blocks: Block[] = [];
   for (const item of draft.blocks) {
     const last = blocks[blocks.length - 1];
     if (item.kind === "locked") {
-      blocks.push(item.block);
+      blocks.push(lockedToBlock(item.block));
     } else if (item.kind === "clause") {
       const style = item.numbered ? "numbered" : "plain";
       if (last?.t === "clauses" && (last.style ?? "plain") === style) last.items.push(markupToHtml(item.text));
@@ -122,33 +130,53 @@ export function fromEditable(draft: EditableDraft): DraftDocument {
   return { language: draft.language, blocks };
 }
 
-/** Plain text of a draft with block ids — what the AI sees when editing or reviewing. */
+/** A structured block as plain lines, for the AI to read (it cannot edit these). */
+function lockedText(block: LockedBlock) {
+  if (block.t === "pagebreak") return "page break";
+  if (block.t === "signatures") return "signatures: " + block.items.map((item) => [item.label, ...item.lines].join(", ")).join(" | ");
+  return block.t + ": " + [...(block.head ? [block.head] : []), ...block.rows].map((row) => row.join(" / ")).join(" | ");
+}
+
+/** Plain text of a draft with block ids — what the AI sees when editing or reviewing. Tables and signatures are read-only. */
 export function draftForAi(draft: EditableDraft) {
   return draft.blocks
-    .filter((block): block is Extract<EditableBlock, { text: string }> => block.kind !== "locked")
-    .map((block) => "[" + block.id + "] (" + block.kind + ") " + block.text)
+    .map((block) => (block.kind === "locked" ? "[" + block.id + "] (locked, read-only) " + lockedText(block.block) : "[" + block.id + "] (" + block.kind + ") " + block.text))
     .join("\n");
 }
 
 /* ------------------------------------------------------------ AI edit ops */
 
+/** `warning`: set by the app when a change alters amounts, dates or numbers, so the advocate checks it. */
+const warning = z.string().max(300).optional();
 export const editOperationSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("replace"), id: z.string().max(64), text: z.string().min(1).max(8000) }),
-  z.object({ op: z.literal("insert_after"), id: z.string().max(64), kind: z.enum(["para", "clause", "detail", "heading"]).default("clause"), text: z.string().min(1).max(8000) }),
-  z.object({ op: z.literal("delete"), id: z.string().max(64) }),
+  z.object({ op: z.literal("replace"), id: z.string().max(64), text: z.string().min(1).max(8000), warning }),
+  z.object({ op: z.literal("insert_after"), id: z.string().max(64), kind: z.enum(["para", "clause", "detail", "heading"]).default("clause"), text: z.string().min(1).max(8000), warning }),
+  z.object({ op: z.literal("delete"), id: z.string().max(64), warning }),
 ]);
 
 export type EditOperation = z.infer<typeof editOperationSchema>;
 
-/** Keeps only operations that target editable blocks that exist. */
-export function validOperations(draft: EditableDraft, operations: unknown[]): EditOperation[] {
-  const editable = new Set(draft.blocks.filter((block) => block.kind !== "locked").map((block) => block.id));
+/**
+ * Keeps only operations that target editable blocks that exist, and marks any
+ * that change or remove numbers (amounts, dates, areas, plot or registration
+ * numbers) the advocate did not mention, so they are checked before applying.
+ */
+export function validOperations(draft: EditableDraft, operations: unknown[], instruction = ""): EditOperation[] {
+  const texts = new Map(draft.blocks.flatMap((block) => (block.kind === "locked" ? [] : [[block.id, block.text] as const])));
+  const asked = numbersIn(instruction).join(" ");
+  const changesNumbers = (before: string, after: string) => numbersIn(before).some((value) => !numbersIn(after).includes(value) && !asked.includes(value));
   return operations
     .map((operation) => editOperationSchema.safeParse(operation))
     .filter((result) => result.success)
-    .map((result) => result.data as EditOperation)
-    .filter((operation) => editable.has(operation.id))
-    .slice(0, 40);
+    .map((result) => ({ ...(result.data as EditOperation), warning: undefined }) as EditOperation)
+    .filter((operation) => texts.has(operation.id))
+    .slice(0, 40)
+    .map((operation) => {
+      const before = texts.get(operation.id) ?? "";
+      if (operation.op === "replace" && changesNumbers(before, operation.text)) return { ...operation, warning: "Changes or drops a number, amount or date. Check it against the papers." };
+      if (operation.op === "delete" && numbersIn(before).length && !/delete|remove|हटा|निकाल/i.test(instruction)) return { ...operation, warning: "Removes text with numbers, amounts or dates." };
+      return operation;
+    });
 }
 
 export function applyOperations(draft: EditableDraft, operations: EditOperation[]): EditableDraft {

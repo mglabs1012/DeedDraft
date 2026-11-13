@@ -1,6 +1,6 @@
 /**
  * Draft document model. Templates return Blocks; renderDraftHtml turns them into a
- * standalone HTML page used for preview, print/PDF and the Word (.doc) export.
+ * standalone HTML page used for print/PDF (the Word file is built by docx.ts).
  * All user-supplied values pass through `html` / `esc`, so templates never
  * concatenate raw input into markup.
  */
@@ -73,12 +73,16 @@ export function renderBlock(block: Block): string {
         : block.items.map((item) => `<p class="clause">${item.value}</p>`).join("");
     case "list":
       return `<ol class="details">${block.items.map((item) => `<li>${item.value}</li>`).join("")}</ol>`;
-    case "table":
+    case "table": {
+      // A two-column table without headings is a key–value schedule: its labels are bold (as in the Word file).
+      const labels = !block.head && block.rows.length > 0 && block.rows.every((row) => row.length === 2);
       return (
-        `<table class="grid">` +
-        (block.head ? `<thead><tr>${block.head.map((cell, index) => `<th${block.widths?.[index] ? ` style="width:${esc(block.widths[index])}"` : ""}>${esc(cell)}</th>`).join("")}</tr></thead>` : "") +
-        `<tbody>${block.rows.map((row) => `<tr>${row.map((cell) => `<td>${part(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        `<table class="schedule">` +
+        (block.widths?.length ? `<colgroup>${block.widths.map((width) => `<col style="width:${esc(width)}"/>`).join("")}</colgroup>` : "") +
+        (block.head ? `<thead><tr>${block.head.map((cell) => `<th>${esc(cell)}</th>`).join("")}</tr></thead>` : "") +
+        `<tbody>${block.rows.map((row) => `<tr>${row.map((cell, index) => `<td${labels && index === 0 ? ' class="label"' : ""}>${part(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
       );
+    }
     case "boundaries":
       return (
         `<table class="bounds"><thead><tr>${block.head.map((cell) => `<th>${esc(cell)}</th>`).join("")}</tr></thead><tbody>` +
@@ -95,29 +99,31 @@ export function renderBlock(block: Block): string {
 }
 
 const styles = `
-@page{size:A4;margin:2cm 2cm 2cm 2.5cm}
+@page{size:A4;margin:2cm 2cm 2cm 2.5cm;@bottom-center{content:counter(page) " / " counter(pages);font:9pt Arial,sans-serif;color:#666}}
 *{box-sizing:border-box}
-body{font-family:"Times New Roman",Georgia,serif;font-size:13pt;line-height:1.75;color:#111;max-width:780px;margin:0 auto;padding:28px 24px;background:#fff}
-.hi{font-family:"Nirmala UI","Mangal","Kokila","Noto Serif Devanagari","Noto Sans Devanagari",serif;font-size:13.5pt;line-height:1.95}
-h1{text-align:center;font-size:19pt;letter-spacing:.06em;margin:4px 0 6px;text-decoration:underline;text-underline-offset:6px}
-h2{font-size:13pt;margin:26px 0 8px;text-align:center;text-decoration:underline;text-underline-offset:4px}
-p{text-align:justify;margin:0 0 12px}
+body{font-family:"Times New Roman",Georgia,serif;font-size:12pt;line-height:1.6;color:#111;max-width:780px;margin:0 auto;padding:28px 24px;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.hi{font-family:"Nirmala UI","Mangal","Kohinoor Devanagari","Devanagari Sangam MN","Noto Serif Devanagari","Noto Sans Devanagari","FreeSerif",serif;font-size:12.5pt;line-height:1.75}
+h1{text-align:center;font-size:16pt;letter-spacing:.04em;margin:4px 0 10px;text-decoration:underline;text-underline-offset:5px}
+h2{font-size:12.5pt;margin:20px 0 8px;text-align:center;text-decoration:underline;text-underline-offset:4px;break-after:avoid;page-break-after:avoid}
+p{text-align:justify;margin:0 0 9px;orphans:2;widows:2}
 .clause{text-indent:3em}
 .center{text-align:center}
-.invocation{text-align:center;font-size:15pt;margin:0}
-.meta{text-align:center;font-size:10pt;color:#555;margin-bottom:22px}
-ol.clauses{padding-left:1.8em;margin:0 0 12px}ol.clauses li{text-align:justify;margin-bottom:10px;padding-left:.3em}
-ol.details{padding-left:1.8em;margin:0 0 14px}ol.details li{margin-bottom:4px}
-table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:.92em}
-.grid th,.grid td,.bounds th,.bounds td{border:1px solid #999;padding:6px 9px;text-align:left;vertical-align:top}
-.grid th,.bounds th{background:#f3f3f3}
-.bounds .side{width:18%;font-weight:bold}.bounds .size{width:18%;white-space:nowrap}
-.signs{display:flex;flex-wrap:wrap;gap:28px 56px;margin-top:36px}
-.sign{flex:1 1 240px;break-inside:avoid}
+.invocation{text-align:center;font-size:14pt;margin:0 0 6px}
+.meta{text-align:center;font-size:10pt;color:#555;margin-bottom:16px}
+ol.clauses{padding-left:1.8em;margin:0 0 9px}ol.clauses li{text-align:justify;margin-bottom:8px;padding-left:.3em}
+ol.details{padding-left:1.8em;margin:0 0 12px}ol.details li{margin-bottom:3px;line-height:1.5}
+table{width:100%;border-collapse:collapse;margin:6px 0 14px;font-size:.92em;line-height:1.4}
+thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
+.schedule th,.schedule td,.bounds th,.bounds td{border:1px solid #8c8c8c;padding:5px 8px;text-align:left;vertical-align:top}
+.schedule th,.bounds th{background:#f2f2f2}.schedule .label{font-weight:bold}
+.bounds{break-inside:avoid;page-break-inside:avoid}.bounds .side{width:18%;font-weight:bold}.bounds .size{width:18%;white-space:nowrap}
+.signs{display:flex;flex-wrap:wrap;gap:24px 48px;margin-top:28px}
+.sign{flex:1 1 240px;break-inside:avoid;page-break-inside:avoid}
+.sign p{text-align:left;line-height:1.45;font-size:.95em}
 .sign .line{border-bottom:1px dotted #333;height:52px;margin-bottom:6px}
 .pagebreak{break-after:page;page-break-after:always;height:1px;border-top:1px dashed #ccc;margin:40px 0}
 .draft{border:1px dashed #b45309;color:#92400e;background:#fffbeb;font:10pt/1.4 Arial,sans-serif;padding:6px 10px;margin-bottom:22px;text-align:center}
-.footer{margin-top:44px;text-align:center;font:9pt/1.4 Arial,sans-serif;color:#666}
+.footer{margin-top:36px;text-align:center;font:9pt/1.4 Arial,sans-serif;color:#666}
 @media print{.draft{display:none}body{padding:0;max-width:none}.pagebreak{border:0;margin:0}}
 `;
 

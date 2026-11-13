@@ -6,6 +6,7 @@ import { LoaderCircle, Pencil, Save, Trash2, type LucideIcon } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import type { DeedData } from "@/lib/schemas/deed-data";
 import { cn } from "@/lib/utils";
+import { confirmDialog } from "@/components/ui/confirm";
 
 export type SaveSection = <K extends keyof Omit<DeedData, "version">>(section: K, value: DeedData[K]) => Promise<boolean>;
 
@@ -61,8 +62,8 @@ export function useListEditor<T extends { id: string }>(items: T[], save: (next:
       if (await save(next)) setEditing(null);
     });
 
-  const remove = (item: T, label: string) => {
-    if (!window.confirm("Remove " + label + "?")) return;
+  const remove = async (item: T, label: string) => {
+    if (!(await confirmDialog({ title: "Remove " + label + "?", description: "It is removed from this deed's details. Draft versions already saved are not changed.", confirmLabel: "Remove", destructive: true }))) return;
     startTransition(async () => {
       await save(items.filter((current) => current.id !== item.id));
     });

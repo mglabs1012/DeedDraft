@@ -1,6 +1,7 @@
 import { getDeedType, type DeedType, type DraftLanguage, type SectionId } from "@/lib/deed-types";
 import type { DeedData } from "@/lib/schemas/deed-data";
 
+import { draftBasis } from "./basis";
 import { renderDraftHtml, type Block, type DraftDocument } from "./blocks";
 import { withBoilerplate } from "./boilerplate";
 import { dedupeBlocks } from "./dedupe";
@@ -39,13 +40,6 @@ export function draftChoices(type: DeedType): DraftChoice[] {
   return languages.length > 1 ? [...languages, "both"] : languages;
 }
 
-export function defaultDraftChoice(type: DeedType, language: "english" | "hindi" | "bilingual"): DraftChoice {
-  const choices = draftChoices(type);
-  if (language === "bilingual" && choices.includes("both")) return "both";
-  if (language !== "bilingual" && choices.includes(language)) return language;
-  return choices[0];
-}
-
 export function buildDraftDocuments(input: DraftInput, choice: DraftChoice, overrides: Partial<Record<DraftLanguage, EditableDraft>> = {}): DraftDocument[] {
   const languages: DraftLanguage[] = choice === "both" ? getDeedType(input.type).languages : [choice];
   return languages.map((language) => {
@@ -62,7 +56,7 @@ export function buildDraftDocuments(input: DraftInput, choice: DraftChoice, over
 
 /** Freshly generated, editable version of the draft for one language (with converted names). */
 export function generateEditable(input: DraftInput, language: DraftLanguage): EditableDraft {
-  return toEditable(buildDraftDocuments(input, language)[0]);
+  return { ...toEditable(buildDraftDocuments(input, language)[0]), basis: draftBasis(input) };
 }
 
 export function buildDraft(input: DraftInput, choice: DraftChoice, overrides: Partial<Record<DraftLanguage, EditableDraft>> = {}) {

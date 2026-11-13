@@ -6,7 +6,6 @@ import {
   createDeedSchema,
   deedIdSchema,
   deleteDeedSchema,
-  updateDeedStatusSchema,
   updateDeedTitleSchema,
   updateRemarksSchema,
 } from "@/lib/schemas/deeds";
@@ -15,6 +14,7 @@ import { getLibraryEntry } from "@/lib/templates/library.server";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
 import { userMessage } from "@/lib/errors";
+import { logActivity } from "@/lib/activity.server";
 
 type ActionResult = { error?: string; id?: string };
 
@@ -51,6 +51,8 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
       data: {
         ...emptyDeedData(),
         execution: { ...emptyDeedData().execution, mapAttached: false },
+        // Premium works on structured facts; library templates are AI-written documents, so they stay in Standard.
+        workspace: { ...emptyDeedData().workspace, mode: template ? "standard" : parsed.data.mode },
         ...(template ? { custom: { templateId: template.id, title: template.title, answers: {}, drafts: {} } } : {}),
       } as unknown as Json,
     })
@@ -59,12 +61,10 @@ export async function createDeed(input: unknown): Promise<ActionResult> {
 
   if (error || !data) return { error: userMessage(error, "Could not create the deed.") };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
+  logActivity(workspace, {
     deed_id: data.id,
-    user_id: workspace.user.id,
     action: "created_deed",
-    details: { reference_no: data.reference_no, deed_type: template ? "other" : parsed.data.deedType, ...(template ? { template: template.title } : {}) },
+    details: { reference_no: data.reference_no, deed_type: template ? "other" : parsed.data.deedType, mode: template ? "standard" : parsed.data.mode, ...(template ? { template: template.title } : {}) },
   });
 
   revalidatePath("/app/dashboard");
@@ -86,42 +86,12 @@ export async function updateDeedTitle(input: unknown): Promise<ActionResult> {
 
   if (error) return { error: userMessage(error) };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
+  logActivity(workspace, {
     deed_id: deed.id,
-    user_id: workspace.user.id,
     action: "updated_title",
     details: { title: parsed.data.title },
   });
 
-  return {};
-}
-
-export async function updateDeedStatus(input: unknown): Promise<ActionResult> {
-  const parsed = updateDeedStatusSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message };
-
-  const { workspace, deed } = await findDeed(parsed.data.id);
-  if (!deed) return { error: "Deed not found." };
-
-  const { error } = await workspace.supabase
-    .from("deeds")
-    .update({ status: parsed.data.status })
-    .eq("id", deed.id);
-
-  if (error) return { error: userMessage(error) };
-
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
-    deed_id: deed.id,
-    user_id: workspace.user.id,
-    action: "changed_status",
-    details: { status: parsed.data.status },
-  });
-
-  revalidatePath("/app/deeds/" + deed.id);
-  revalidatePath("/app/dashboard");
-  revalidatePath("/app/deeds");
   return {};
 }
 
@@ -139,10 +109,8 @@ export async function updateRemarks(input: unknown): Promise<ActionResult> {
 
   if (error) return { error: userMessage(error) };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
+  logActivity(workspace, {
     deed_id: deed.id,
-    user_id: workspace.user.id,
     action: "updated_remarks",
     details: {},
   });
@@ -173,10 +141,8 @@ export async function duplicateDeed(input: unknown): Promise<ActionResult> {
 
   if (error || !data) return { error: userMessage(error, "Could not duplicate the deed.") };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
+  logActivity(workspace, {
     deed_id: data.id,
-    user_id: workspace.user.id,
     action: "duplicated_deed",
     details: { source_deed_id: deed.id, reference_no: data.reference_no },
   });
@@ -207,12 +173,10 @@ export async function deleteDeed(input: unknown): Promise<ActionResult> {
     if (storageError) return { error: userMessage(storageError) };
   }
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
-    deed_id: deed.id,
-    user_id: workspace.user.id,
+  // The deed row is gone, so the entry keeps its id in the details (a deed_id would fail the foreign key).
+  logActivity(workspace, {
     action: "deleted_deed",
-    details: { reference_no: deed.reference_no, title: deed.title },
+    details: { deleted_deed_id: deed.id, reference_no: deed.reference_no, title: deed.title },
   });
 
   const { error } = await workspace.supabase.from("deeds").delete().eq("id", deed.id);

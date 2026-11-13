@@ -336,7 +336,7 @@ function detailItems(ctx: Ctx, property: Property, expenses?: boolean): SafeHtml
     items.push(name + " is for " + landUse(property, "english") + " use.");
     const records = recordRefs(property, "english");
     if (records) items.push("Record particulars: " + records + ".");
-    if (property.area) items.push("Total area: " + areaTriple(property, "english") + ".");
+    if (property.area) items.push("Total area: " + areaTriple(property, "english").replace(/\.$/, "") + ".");
     if (property.plotDimensions) items.push("Dimensions: " + property.plotDimensions + ".");
     if (built) {
       items.push(

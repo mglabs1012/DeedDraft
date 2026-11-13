@@ -38,7 +38,8 @@ export const partySchema = z.object({
   fullName: z.string().trim().min(2, "Enter the full name.").max(160),
   alias: text(160),
   gender: genderSchema.default("male"),
-  relation: relationSchema,
+  // Defaulted, so a stored person without a relation is never silently dropped when the deed loads.
+  relation: relationSchema.default("S/o"),
   relativeName: text(160),
   relativeDeceased: z.boolean().default(false),
   age: optionalNumber,
@@ -189,8 +190,6 @@ export const considerationSchema = z.object({
 
 /* ------------------------------------------------------------------- Terms */
 
-export const byPartySchema = z.enum(["first", "second"]);
-
 export const termsSchema = z.object({
   // gift / release / family
   relationship: text(200),
@@ -264,30 +263,6 @@ export const localizedSchema = z.object({
   english: z.record(z.string().max(8000)).default({}),
 });
 
-const aiEditSchema = z.object({
-  op: z.enum(["replace", "insert_after", "delete"]),
-  index: z.number().int().min(-1).max(5000),
-  text: z.string().max(12000).optional(),
-});
-
-/** AI refinement of the standard draft, stored as edits tied to the exact draft they were made for. */
-export const aiDraftVersionSchema = z.object({
-  baseHash: z.string().max(40),
-  edits: z.array(aiEditSchema).max(400),
-  notes: z.array(z.string().max(600)).max(20).default([]),
-  generatedAt: z.string().max(40),
-});
-
-export const aiDraftSchema = z.object({ hindi: aiDraftVersionSchema.optional(), english: aiDraftVersionSchema.optional() });
-
-export const chatMessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  text: z.string().max(20000),
-  at: z.string().max(40),
-  clauses: z.array(z.string().max(4000)).max(10).optional(),
-  remember: z.string().max(1000).optional(),
-});
-
 /* --------------------------------------------------------------- Aggregate */
 
 /** Parses an array item by item so one malformed record never discards the rest. */
@@ -307,7 +282,8 @@ const emptyTerms = termsSchema.parse({});
 const emptyExecution = executionSchema.parse({});
 
 export const standardWorkspaceSchema = z.object({
-  mode: z.literal("standard").default("standard"),
+  /** Standard: guided single page. Premium: full sectioned workspace for complex matters. Same data either way. */
+  mode: z.enum(["standard", "premium"]).catch("standard").default("standard"),
   modules: z.object({ naksha: z.boolean().default(false), consideration: z.boolean().default(false) }).default({}),
   processedDocuments: z.array(z.string().uuid()).max(500).default([]),
   documentRoles: z.record(z.enum(["first", "second", "witness", "other"])).default({}),
@@ -324,8 +300,6 @@ export const deedDataSchema = z.object({
   execution: executionSchema.catch(emptyExecution),
   custom: customDocSchema.optional().catch(undefined),
   localized: localizedSchema.catch({ hindi: {}, english: {} }),
-  aiDraft: aiDraftSchema.catch({}),
-  chat: lenientArray(chatMessageSchema, 60),
   workspace: standardWorkspaceSchema.catch(standardWorkspaceSchema.parse({})),
 });
 
@@ -338,18 +312,6 @@ export const sectionSchemas = {
   terms: termsSchema,
   execution: executionSchema,
 } as const;
-
-export type SectionKey = keyof typeof sectionSchemas;
-
-export const updateDeedSectionSchema = z.discriminatedUnion("section", [
-  z.object({ id: z.string().uuid(), section: z.literal("parties"), value: sectionSchemas.parties }),
-  z.object({ id: z.string().uuid(), section: z.literal("properties"), value: sectionSchemas.properties }),
-  z.object({ id: z.string().uuid(), section: z.literal("titleChain"), value: sectionSchemas.titleChain }),
-  z.object({ id: z.string().uuid(), section: z.literal("payments"), value: sectionSchemas.payments }),
-  z.object({ id: z.string().uuid(), section: z.literal("consideration"), value: sectionSchemas.consideration }),
-  z.object({ id: z.string().uuid(), section: z.literal("terms"), value: sectionSchemas.terms }),
-  z.object({ id: z.string().uuid(), section: z.literal("execution"), value: sectionSchemas.execution }),
-]);
 
 export const updateProfileSchema = z.object({
   fullName: z.string().trim().min(2, "Enter your full name.").max(120),
@@ -366,14 +328,18 @@ export type Execution = z.infer<typeof executionSchema>;
 export type DeedData = z.infer<typeof deedDataSchema>;
 export type CustomDoc = z.infer<typeof customDocSchema>;
 export type Localized = z.infer<typeof localizedSchema>;
-export type AiDraftVersion = z.infer<typeof aiDraftVersionSchema>;
-export type AiEdit = z.infer<typeof aiEditSchema>;
-export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type CustomDraft = z.infer<typeof customDraftSchema>;
 export type PartyRole = z.infer<typeof partyRoleSchema>;
 
 export function emptyDeedData(): DeedData {
-  return { version: DEED_DATA_VERSION, parties: [], properties: [], titleChain: [], consideration: {}, payments: [], terms: emptyTerms, execution: emptyExecution, localized: { hindi: {}, english: {} }, aiDraft: {}, chat: [], workspace: standardWorkspaceSchema.parse({}) };
+  return { version: DEED_DATA_VERSION, parties: [], properties: [], titleChain: [], consideration: {}, payments: [], terms: emptyTerms, execution: emptyExecution, localized: { hindi: {}, english: {} }, workspace: standardWorkspaceSchema.parse({}) };
+}
+
+/** Stored deed data without sections older versions wrote and nothing reads (the per-segment AI refinement and its chat). */
+export function withoutLegacyKeys(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const { aiDraft: _aiDraft, chat: _chat, ...rest } = value as Record<string, unknown>; // eslint-disable-line @typescript-eslint/no-unused-vars
+  return rest;
 }
 
 export function parseDeedData(value: unknown): DeedData {

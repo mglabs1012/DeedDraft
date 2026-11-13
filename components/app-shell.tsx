@@ -7,14 +7,16 @@ import { ChevronDown, FolderOpen, House, Plus, Scale, UserRound } from "lucide-r
 import { signOut } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 import { GuidedTour } from "@/components/guided-tour";
+import type { TourPreferences } from "@/lib/onboarding";
 
 const links = [
   { href: "/app/dashboard", label: "Home", icon: House, active: (path: string) => path === "/app/dashboard" },
   { href: "/app/deeds", label: "My deeds", icon: FolderOpen, active: (path: string) => path.startsWith("/app/deeds") && path !== "/app/deeds/new" },
 ];
 
-export function AppShell({ children, firmName, userName, userId }: {
+export function AppShell({ children, firmName, userName, userId, tour }: {
   children: React.ReactNode; firmName: string; userName: string; userId: string;
+  tour?: { initial: TourPreferences; accountCreatedAt?: string };
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -38,11 +40,11 @@ export function AppShell({ children, firmName, userName, userId }: {
                 <Icon className="size-4 sm:hidden" aria-hidden="true" />{label}
               </Link>
             ))}
-            <Link href="/app/deeds/new" aria-label="New deed" className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/85 sm:px-3"><Plus className="size-4" /><span className="hidden sm:inline">New deed</span></Link>
-            <GuidedTour key={userId} userId={userId} />
+            <Link href="/app/deeds/new" aria-label="New deed" className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/85 active:translate-y-px sm:px-3"><Plus className="size-4" /><span className="hidden sm:inline">New deed</span></Link>
+            <GuidedTour key={userId} userId={userId} initial={tour?.initial} accountCreatedAt={tour?.accountCreatedAt} />
             <div className="relative" ref={menu}>
-              <button aria-expanded={open} aria-controls="account-menu" aria-label="Account menu" onClick={() => setOpen(!open)} className="flex items-center gap-1 whitespace-nowrap rounded-lg px-1.5 py-2 text-muted-foreground hover:text-primary" type="button"><UserRound className="size-4 sm:hidden" /><span className="hidden max-w-32 truncate sm:inline">{userName.split(" ")[0]}</span><ChevronDown className="size-3.5" /></button>
-              {open ? <div id="account-menu" onClick={(event) => { if ((event.target as HTMLElement).closest("a")) setOpen(false); }} className="absolute right-0 z-40 mt-2 w-60 rounded-xl border border-border bg-card p-2 shadow-lg">
+              <button aria-expanded={open} aria-controls="account-menu" aria-label="Account menu" onClick={() => setOpen(!open)} className="flex items-center gap-1 whitespace-nowrap rounded-lg px-1.5 py-2 text-muted-foreground hover:text-primary" type="button"><UserRound className="size-4 sm:hidden" /><span className="hidden max-w-32 truncate sm:inline">{userName.split(" ")[0]}</span><ChevronDown className={cn("size-3.5 transition-transform duration-150", open && "rotate-180")} /></button>
+              {open ? <div id="account-menu" onClick={(event) => { if ((event.target as HTMLElement).closest("a")) setOpen(false); }} className="absolute right-0 z-40 mt-2 w-60 origin-top-right rounded-xl border border-border bg-card p-2 shadow-lg duration-150 animate-in fade-in zoom-in-95">
                 <p className="truncate border-b border-border px-3 py-3 text-xs text-muted-foreground">{userName} · {firmName}</p>
                 <Link href="/app/settings" className="block rounded-lg px-3 py-2 text-sm hover:bg-secondary">Settings</Link>
                 <Link href="/app/settings/ai" className="block rounded-lg px-3 py-2 text-sm hover:bg-secondary">AI memory & style</Link>

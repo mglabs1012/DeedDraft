@@ -55,7 +55,8 @@ export function releaseDeed(ctx: Ctx): Block[] {
   }
 
   const clauses: SafeHtml[] = [
-    html`WHEREAS ${R1} and ${R2} jointly hold ${single ? propertyEn(ctx.data.properties[0]) : "the properties described in the Schedule"}${terms.share ? ", in which " + R1 + " holds a " + terms.share + " share" : ""}.`,
+    // The property description may already end in "sq. yd.": never print a doubled full stop.
+    html`WHEREAS ${R1} and ${R2} jointly hold ${((single ? propertyEn(ctx.data.properties[0]) : "the properties described in the Schedule") + (terms.share ? ", in which " + R1 + " holds a " + terms.share + " share" : "")).replace(/\.$/, "")}.`,
     ...titleRecital(ctx),
     html`NOW THIS DEED OF RELEASE WITNESSETH that ${R1} hereby releases and relinquishes all their share, right, title and interest in ${property} in favour of ${R2}${total ? " for a consideration of " + money(ctx, total) : " without any consideration"}, and neither ${R1} nor their heirs shall have any claim over it hereafter.`,
     ...(ctx.data.payments.length ? [html`The consideration has been received as follows: ${ctx.data.payments.map((payment) => paymentPhrase(ctx, payment)).join("; ")}.`] : []),

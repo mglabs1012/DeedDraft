@@ -1,44 +1,10 @@
 /**
- * Shared AI contract: the context shape for model calls and the
- * non-destructive merge used when applying AI extraction results.
+ * The non-destructive merge used when applying what the AI read from a paper:
+ * it adds to the deed's details and never overwrites what the advocate entered.
  * Model calls live in lib/ai/claude.ts and app/actions/ai.ts.
  */
 
-import { getDeedType, type DeedType } from "@/lib/deed-types";
 import { parseDeedData, type DeedData } from "@/lib/schemas/deed-data";
-
-export type AiTask = "extract_from_documents" | "draft_clauses" | "translate" | "review_draft";
-
-export type AiDocumentRef = {
-  id: string;
-  fileName: string;
-  category: string;
-  mimeType: string;
-};
-
-export type AiDeedContext = {
-  task: AiTask;
-  deedType: DeedType;
-  deedTypeLabel: string;
-  language: "english" | "hindi" | "bilingual";
-  referenceNo: string;
-  title: string;
-  instructions: string;
-  data: DeedData;
-  documents: AiDocumentRef[];
-  firm: { name: string; city: string };
-};
-
-/** What an extraction model returns: any subset of DeedData plus provenance. */
-export type AiExtraction = {
-  data: Partial<DeedData>;
-  confidence?: Record<string, number>;
-  sources?: Record<string, { documentId: string; page?: number }>;
-};
-
-export function buildAiContext(input: Omit<AiDeedContext, "deedTypeLabel">): AiDeedContext {
-  return { ...input, deedTypeLabel: getDeedType(input.deedType).label };
-}
 
 type Loose = Record<string, unknown>;
 const norm = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();

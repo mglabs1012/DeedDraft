@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { CircleHelp, Compass, X } from "lucide-react";
-import { tours, parseTourPreferences, type TourPreferences, type TourStep } from "@/lib/onboarding";
+import { saveTourPreferences } from "@/app/actions/tour";
+import { autoTourAllowed, mergeTourPreferences, tours, parseTourPreferences, type TourPreferences, type TourStep } from "@/lib/onboarding";
 
 /** Keyboard/touch help as well as hover; no hover-only essential instructions. */
 export function HelpTip({ text }: { text: string }) {
@@ -19,19 +20,23 @@ export function HelpTip({ text }: { text: string }) {
 
 function currentScope() {
   if (document.querySelector('[data-tour="draft-review"]')) return "draft";
+  if (document.querySelector('[data-tour="premium-nav"]')) return "premium";
   if (document.querySelector('[data-tour="paper-upload"]')) return "workspace";
   if (document.querySelector('[data-tour="templates"]')) return "templates";
   if (document.querySelector('[data-tour="standard-mode"]')) return "home";
   return null;
 }
 
-export function GuidedTour({ userId }: { userId: string }) {
+export function GuidedTour({ userId, initial, accountCreatedAt }: { userId: string; initial?: TourPreferences; accountCreatedAt?: string }) {
   const key = "deeddraft:guided-tour:v1:" + userId;
-  const prefs = useRef<TourPreferences>({ skipped: false, completed: [] });
+  const prefs = useRef<TourPreferences>(initial ?? { skipped: false, completed: [] });
   const lastScope = useRef<string | null>(null);
   const [active, setActive] = useState<{ scope: string; index: number } | null>(null);
   useEffect(() => {
-    try { prefs.current = parseTourPreferences(localStorage.getItem(key)); } catch { /* In-memory help still works if storage is unavailable. */ }
+    // Account preferences (any device) merged with this browser's earlier record.
+    try { prefs.current = mergeTourPreferences(prefs.current, parseTourPreferences(localStorage.getItem(key))); } catch { /* In-memory help still works if storage is unavailable. */ }
+    // Guides open by themselves only for a new account, once per screen; existing users are never interrupted.
+    const auto = autoTourAllowed(prefs.current, accountCreatedAt);
     let frame = 0;
     const inspect = () => {
       cancelAnimationFrame(frame);
@@ -39,21 +44,20 @@ export function GuidedTour({ userId }: { userId: string }) {
         const scope = currentScope();
         if (scope === lastScope.current) return;
         lastScope.current = scope;
-        setActive(scope && !prefs.current.skipped && !prefs.current.completed.includes(scope) ? { scope, index: 0 } : null);
+        setActive(auto && scope && !prefs.current.skipped && !prefs.current.completed.includes(scope) ? { scope, index: 0 } : null);
       });
     };
     const observer = new MutationObserver(inspect);
     observer.observe(document.getElementById("main-content") ?? document.body, { childList: true, subtree: true });
     inspect();
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [key]);
+  }, [key, accountCreatedAt]);
   const close = (skip: boolean) => {
     if (!active) return;
-    prefs.current = {
-      skipped: skip,
-      completed: [...new Set([...prefs.current.completed, active.scope])],
-    };
+    // Skip is permanent: finishing a replayed guide later must not switch automatic guides back on.
+    prefs.current = { skipped: prefs.current.skipped || skip, completed: [...new Set([...prefs.current.completed, active.scope])] };
     try { localStorage.setItem(key, JSON.stringify(prefs.current)); } catch { /* Never block drafting on tutorial storage. */ }
+    void saveTourPreferences(prefs.current).catch(() => undefined);
     setActive(null);
   };
   const tour = active ? tours[active.scope] : null;
@@ -111,7 +115,7 @@ function TourCard({ step, index, total, label, onSkip, onBack, onNext }: {
   return <dialog ref={dialog} aria-labelledby={id + "-title"} aria-describedby={id + "-text"} onCancel={(event) => { event.preventDefault(); onSkip(); }}
     className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none overflow-hidden border-0 bg-transparent p-0 text-foreground backdrop:bg-transparent">
     {rect ? <div aria-hidden="true" className="pointer-events-none fixed rounded-xl border-2 border-white ring-2 ring-primary" style={{ ...rect, boxShadow: "0 0 0 9999px rgb(0 0 0 / 0.55)" }} /> : <div aria-hidden="true" className="fixed inset-0 bg-black/55" />}
-    <div ref={card} className="fixed left-1/2 max-h-[calc(100dvh_-_24px)] w-[calc(100%_-_24px)] max-w-sm -translate-x-1/2 overflow-auto rounded-2xl border border-border bg-card p-5 shadow-2xl sm:p-6" style={{ top: cardTop ?? 16 }}>
+    <div ref={card} className="fixed left-1/2 max-h-[calc(100dvh_-_24px)] w-[calc(100%_-_24px)] max-w-sm -translate-x-1/2 overflow-auto rounded-2xl border border-border bg-card p-5 shadow-2xl transition-[top] duration-200 sm:p-6" style={{ top: cardTop ?? 16 }}>
       <div className="flex items-center justify-between gap-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><button type="button" onClick={onSkip} aria-label="Skip tutorial" className="rounded-md p-1 text-muted-foreground hover:bg-secondary"><X className="size-4" /></button></div>
       <p className="mt-3 text-xs font-medium text-primary" aria-live="polite">Step {index + 1} of {total}</p>
       <h2 id={id + "-title"} className="mt-2 text-xl font-semibold tracking-tight">{step.title}</h2>
@@ -120,9 +124,9 @@ function TourCard({ step, index, total, label, onSkip, onBack, onNext }: {
       <div className="mt-5 flex items-center gap-3">
         <button type="button" onClick={onSkip} className="mr-auto text-xs text-muted-foreground hover:underline">Skip tutorial</button>
         <button type="button" onClick={onBack} disabled={!index} className="rounded-lg px-2 py-2 text-sm disabled:opacity-30">Back</button>
-        <button ref={next} type="button" onClick={onNext} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{index === total - 1 ? "Got it" : "Next"}</button>
+        <button ref={next} type="button" onClick={onNext} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/85 active:translate-y-px">{index === total - 1 ? "Got it" : "Next"}</button>
       </div>
-      <p className="mt-4 text-[10px] leading-4 text-muted-foreground">This guide never changes your deed. Your tutorial preference is remembered on this browser.</p>
+      <p className="mt-4 text-[10px] leading-4 text-muted-foreground">This guide never changes your deed. Your tutorial preference is saved to your account.</p>
     </div>
   </dialog>;
 }

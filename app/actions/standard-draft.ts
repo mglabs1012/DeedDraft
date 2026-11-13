@@ -13,14 +13,36 @@ import { parseDeedData, type Localized } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
 import { assertTaskActive, reportDraftStage } from "@/lib/ai/task-context";
 
+/**
+ * Saved versions of a deed's drafts. Only the latest version of each language
+ * comes with its text (that is what opens); older versions are listed by
+ * number, date and note, and their text is fetched when one is chosen. This
+ * keeps opening the Draft tab fast however many versions exist.
+ */
 export async function loadStandardDrafts(input: unknown): Promise<{ error?: string; drafts: SavedDraft[] }> {
   const id = z.string().uuid().safeParse(input);
   if (!id.success) return { error: "Invalid deed.", drafts: [] };
   const workspace = await requireWorkspace();
-  const { data, error } = await workspace.supabase.from("deed_drafts")
-    .select("id, language, version, note, created_at, content").eq("deed_id", id.data).eq("firm_id", workspace.firm.id)
-    .order("version", { ascending: false }).limit(20);
-  return error ? { error: "Draft versions could not be loaded. Check database migration 0004.", drafts: [] } : { drafts: data as SavedDraft[] };
+  const drafts = () => workspace.supabase.from("deed_drafts");
+  const latest = (language: "hindi" | "english") => drafts().select("id, content").eq("deed_id", id.data).eq("firm_id", workspace.firm.id).eq("language", language).order("version", { ascending: false }).limit(1);
+  const [list, hindi, english] = await Promise.all([
+    drafts().select("id, language, version, note, created_at").eq("deed_id", id.data).eq("firm_id", workspace.firm.id).order("version", { ascending: false }).limit(40),
+    latest("hindi"),
+    latest("english"),
+  ]);
+  if (list.error || hindi.error || english.error) return { error: "Draft versions could not be loaded. Check database migration 0004.", drafts: [] };
+  const content = new Map([...(hindi.data ?? []), ...(english.data ?? [])].map((row) => [row.id, row.content]));
+  return { drafts: (list.data ?? []).map((row) => ({ ...row, content: content.get(row.id) ?? null })) as SavedDraft[] };
+}
+
+/** The text of one older version, fetched when it is chosen from Versions. */
+export async function loadDraftVersion(input: unknown): Promise<{ error: string } | { error?: undefined; content: unknown }> {
+  const parsed = z.object({ deedId: z.string().uuid(), id: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid version." };
+  const workspace = await requireWorkspace();
+  const { data, error } = await workspace.supabase.from("deed_drafts").select("content").eq("id", parsed.data.id).eq("deed_id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
+  if (error || !data) return { error: "This version could not be opened. Try again." };
+  return { content: data.content };
 }
 
 type DraftLanguageChoice = "hindi" | "english";

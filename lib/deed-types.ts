@@ -194,13 +194,3 @@ export function isDeedType(value: unknown): value is DeedType {
   return typeof value === "string" && value in deedTypes;
 }
 
-/** Tabs a deed of this type shows, in order. */
-export function sectionsFor(type: DeedType): SectionId[] {
-  const config = getDeedType(type);
-  // Papers first: uploaded documents are read (OCR) and pre-fill the later steps.
-  const sections: SectionId[] = ["documents", "parties", "properties"];
-  if (config.titleChain !== "none") sections.push("title");
-  if (config.consideration !== "none") sections.push("payments");
-  sections.push("terms");
-  return sections;
-}

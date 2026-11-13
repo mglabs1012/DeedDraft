@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { extractFromDocument, readDocumentText } from "@/app/actions/ai";
 import { mergeExtraction } from "@/lib/ai/contract";
-import { parseDeedData, sectionSchemas, standardWorkspaceSchema, type DeedData } from "@/lib/schemas/deed-data";
+import { parseDeedData, sectionSchemas, standardWorkspaceSchema, withoutLegacyKeys, type DeedData } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
 
@@ -20,7 +20,7 @@ async function mutate(id: string, transform: (data: DeedData) => Partial<DeedDat
     let patch: Partial<DeedData>;
     try { patch = transform(parseDeedData(deed.data)); }
     catch (error) { return { error: error instanceof Error ? error.message : "Could not save changes." }; }
-    const next = { ...(deed.data as Record<string, Json>), ...patch } as Json;
+    const next = { ...withoutLegacyKeys(deed.data), ...patch } as Json;
     const { data: saved, error: saveError } = await workspace.supabase.from("deeds")
       .update({ data: next }).eq("id", id).eq("firm_id", workspace.firm.id).eq("updated_at", deed.updated_at)
       .select("data").maybeSingle();
@@ -50,6 +50,16 @@ export async function toggleStandardModule(input: unknown): Promise<Result> {
   return mutate(parsed.data.id, (data) => ({
     workspace: standardWorkspaceSchema.parse({ ...data.workspace, modules: { ...data.workspace.modules, [parsed.data.module]: parsed.data.enabled } }),
   }));
+}
+
+/** Opens the same deed in the other workspace. Nothing in the deed's facts changes. */
+export async function setDeedMode(input: unknown): Promise<Result> {
+  const parsed = z.object({ id: z.string().uuid(), mode: z.enum(["standard", "premium"]) }).safeParse(input);
+  if (!parsed.success) return { error: "Invalid mode." };
+  return mutate(parsed.data.id, (data) => {
+    if (parsed.data.mode === "premium" && data.custom) throw new Error("Documents made from a library template stay in Standard Mode.");
+    return { workspace: standardWorkspaceSchema.parse({ ...data.workspace, mode: parsed.data.mode }) };
+  });
 }
 
 export async function assignDocumentRoles(input: unknown): Promise<Result> {

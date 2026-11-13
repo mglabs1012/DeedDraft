@@ -5,10 +5,10 @@ import { revalidatePath } from "next/cache";
 import {
   createDocumentSchema,
   documentIdSchema,
-  recategorizeDocumentSchema,
 } from "@/lib/schemas/documents";
 import { requireWorkspace } from "@/lib/workspace";
 import { userMessage } from "@/lib/errors";
+import { logActivity } from "@/lib/activity.server";
 
 type ActionResult = { error?: string; url?: string; id?: string };
 
@@ -57,41 +57,14 @@ export async function createDocumentRecord(input: unknown): Promise<ActionResult
 
   if (error || !created) return { error: userMessage(error, "Could not save the document.") };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
+  logActivity(workspace, {
     deed_id: parsed.data.deedId,
-    user_id: workspace.user.id,
     action: "uploaded_document",
     details: { file_name: parsed.data.fileName, category: parsed.data.category },
   });
 
   revalidatePath("/app/deeds/" + parsed.data.deedId);
   return { id: created.id };
-}
-
-export async function recategorizeDocument(input: unknown): Promise<ActionResult> {
-  const parsed = recategorizeDocumentSchema.safeParse(input);
-  if (!parsed.success) return { error: "Invalid document category." };
-
-  const { workspace, document } = await findDocument(parsed.data.id);
-  if (!document) return { error: "Document not found." };
-
-  const { error } = await workspace.supabase
-    .from("deed_documents")
-    .update({ category: parsed.data.category })
-    .eq("id", document.id);
-
-  if (error) return { error: userMessage(error) };
-
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
-    deed_id: document.deed_id,
-    user_id: workspace.user.id,
-    action: "recategorized_document",
-    details: { file_name: document.file_name, category: parsed.data.category },
-  });
-
-  return {};
 }
 
 export async function createDocumentSignedUrl(input: unknown): Promise<ActionResult> {
@@ -161,10 +134,8 @@ export async function deleteDocument(input: unknown): Promise<ActionResult> {
     .eq("id", document.id);
   if (error) return { error: userMessage(error) };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
+  logActivity(workspace, {
     deed_id: document.deed_id,
-    user_id: workspace.user.id,
     action: "deleted_document",
     details: { file_name: document.file_name },
   });

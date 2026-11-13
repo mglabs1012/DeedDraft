@@ -22,9 +22,4 @@ export const createDocumentSchema = z.object({
   sizeBytes: z.number().int().positive().max(20 * 1024 * 1024),
 });
 
-export const recategorizeDocumentSchema = z.object({
-  id: z.string().uuid(),
-  category: documentCategorySchema,
-});
-
 export const documentIdSchema = z.object({ id: z.string().uuid() });

@@ -1,4 +1,5 @@
 import "server-only";
+import { rejectedFeature, retryWithoutReasoning, type Feature } from "./compat";
 import { assertTaskActive, taskSignal } from "./task-context";
 
 import {
@@ -130,7 +131,20 @@ type CallOptions = {
   maxTokens?: number;
   temperature?: number;
   timeoutMs?: number;
+  /**
+   * Let the model reason step by step before answering (adaptive thinking).
+   * Used for legal reviews and draft edits, where checking every clause matters
+   * more than speed. Models without it answer normally.
+   */
+  reasoning?: boolean;
 };
+
+type ToolConfig = ConstructorParameters<typeof ConverseCommand>[0]["toolConfig"];
+/**
+ * Request options a model rejected, learned from its validation errors (see compat.ts);
+ * each is dropped once and remembered per model, so changing BEDROCK_MODEL_ID never breaks the app.
+ */
+const rejected = new Map<string, Set<Feature>>();
 
 const isConversation = (content: CallOptions["content"]): content is Message[] => Array.isArray(content) && content.length > 0 && "role" in (content[0] as object);
 
@@ -142,39 +156,68 @@ function systemBlocks(system: string, cachedContext?: string): SystemContentBloc
   return blocks;
 }
 
-async function converse(options: CallOptions & { toolConfig?: ConstructorParameters<typeof ConverseCommand>[0]["toolConfig"] }) {
+async function converse(options: CallOptions & { toolConfig?: ToolConfig }) {
   if (!isAiConfigured()) throw new AiError(AI_NOT_CONFIGURED);
   const model = options.model ?? aiModel();
   const started = Date.now();
   const messages: Message[] = isConversation(options.content)
     ? options.content
     : [{ role: "user", content: typeof options.content === "string" ? [{ text: options.content }] : (options.content as ContentPart[]) }];
-  try {
-    const response = await client().send(
-      new ConverseCommand({
-        modelId: model,
-        system: systemBlocks(options.system, options.cachedContext),
-        messages,
-        inferenceConfig: { maxTokens: options.maxTokens ?? 8192, temperature: options.temperature ?? 0.2 },
-        ...(options.toolConfig ? { toolConfig: options.toolConfig } : {}),
-      }),
-      { abortSignal: AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS), ...(taskSignal() ? [taskSignal()!] : [])]) },
-    );
-    if (response.stopReason === "max_tokens") throw new AiError("The AI response was cut off at the output limit. Try fewer or smaller documents.");
-    if (response.stopReason === "content_filtered" || response.stopReason === "guardrail_intervened") throw new AiError("The AI declined to process this request.");
-    const usage: AiUsage = {
-      model,
-      promptTokens: response.usage?.inputTokens,
-      completionTokens: response.usage?.outputTokens,
-      cacheReadTokens: response.usage?.cacheReadInputTokens,
-      cacheWriteTokens: response.usage?.cacheWriteInputTokens,
-      latencyMs: Date.now() - started,
-    };
-    return { blocks: response.output?.message?.content ?? [], usage };
-  } catch (error) {
-    assertTaskActive();
-    throw describe(error, model);
+  const skip = rejected.get(model) ?? new Set<Feature>();
+  let plain = false;
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const thinking = Boolean(options.reasoning) && !plain && !skip.has("thinking");
+    const forced = Boolean(options.toolConfig?.toolChoice?.tool) && !thinking && !skip.has("forcedTool");
+    const sent = new Set<Feature>();
+    if (thinking) sent.add("thinking");
+    if (thinking && !skip.has("effort")) sent.add("effort");
+    if (forced) sent.add("forcedTool");
+    // A fixed temperature is not allowed while thinking.
+    if (!thinking && !skip.has("temperature")) sent.add("temperature");
+    const toolConfig: ToolConfig | undefined = options.toolConfig && { ...options.toolConfig, toolChoice: forced ? options.toolConfig.toolChoice : { auto: {} } };
+    try {
+      const response = await client().send(
+        new ConverseCommand({
+          modelId: model,
+          system: systemBlocks(options.system, options.cachedContext),
+          messages,
+          inferenceConfig: {
+            // Thinking shares the output budget, so it gets more room.
+            maxTokens: thinking ? Math.max(options.maxTokens ?? 8192, 16000) : options.maxTokens ?? 8192,
+            ...(sent.has("temperature") ? { temperature: options.temperature ?? 0.2 } : {}),
+          },
+          ...(thinking ? { additionalModelRequestFields: { thinking: { type: "adaptive" }, ...(sent.has("effort") ? { output_config: { effort: "medium" } } : {}) } } : {}),
+          ...(toolConfig ? { toolConfig } : {}),
+        }),
+        { abortSignal: AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? (thinking ? 170_000 : REQUEST_TIMEOUT_MS)), ...(taskSignal() ? [taskSignal()!] : [])]) },
+      );
+      if (response.stopReason === "max_tokens") throw new AiError("The AI response was cut off at the output limit. Try fewer or smaller documents.");
+      if (response.stopReason === "content_filtered" || response.stopReason === "guardrail_intervened") throw new AiError("The AI declined to process this request.");
+      const usage: AiUsage = {
+        model,
+        promptTokens: response.usage?.inputTokens,
+        completionTokens: response.usage?.outputTokens,
+        cacheReadTokens: response.usage?.cacheReadInputTokens,
+        cacheWriteTokens: response.usage?.cacheWriteInputTokens,
+        latencyMs: Date.now() - started,
+      };
+      return { blocks: response.output?.message?.content ?? [], usage };
+    } catch (error) {
+      assertTaskActive();
+      const feature = rejectedFeature(error, sent);
+      if (feature) {
+        // Drop the option this model refused, remember it, and retry without it.
+        skip.add(feature);
+        rejected.set(model, skip);
+      } else if (retryWithoutReasoning(error, sent)) {
+        plain = true;
+      } else {
+        throw describe(error, model);
+      }
+    }
   }
+  throw new AiError("The AI rejected the request settings. Check BEDROCK_MODEL_ID.", 400);
 }
 
 /** Sends one request and waits for the complete text response. */
@@ -194,6 +237,8 @@ export async function generateJson<T = Record<string, unknown>>(
 ): Promise<{ data: T; usage: AiUsage }> {
   const { blocks, usage } = await converse({
     ...options,
+    // When the tool cannot be forced (reasoning, or a model that refuses forced tools), the prompt asks for it.
+    system: options.system + "\n\nGive your answer by calling the " + options.name + " tool.",
     toolConfig: {
       tools: [{ toolSpec: { name: options.name, description: options.description, inputSchema: { json: options.schema } as ToolInputSchema } }],
       toolChoice: { tool: { name: options.name } },

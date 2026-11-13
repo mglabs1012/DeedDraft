@@ -25,7 +25,8 @@ export function Modal({ open, onClose, title, description, children, footer, cla
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
     const focusable = () => Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]') ?? []).filter((element) => element.getClientRects().length > 0);
-    focusable()[0]?.focus();
+    // A control marked data-autofocus (e.g. the safe choice in a confirmation) takes the focus; otherwise the first control.
+    (panel.current?.querySelector<HTMLElement>("[data-autofocus]") ?? focusable()[0] ?? panel.current)?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close.current();
       if (event.key === "Tab") {
@@ -49,14 +50,14 @@ export function Modal({ open, onClose, title, description, children, footer, cla
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
-      <button aria-label="Close dialog" className="absolute inset-0 bg-primary/45 backdrop-blur-[1px]" onClick={onClose} type="button" />
+      <button aria-label="Close dialog" className="absolute inset-0 bg-primary/45 backdrop-blur-[1px] duration-200 animate-in fade-in" onClick={onClose} tabIndex={-1} type="button" />
       <div
         aria-modal="true"
         aria-labelledby={titleId}
         ref={panel}
         tabIndex={-1}
         className={cn(
-          "relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-card shadow-2xl sm:max-w-lg sm:rounded-2xl",
+          "relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-card shadow-2xl outline-none duration-200 animate-in fade-in slide-in-from-bottom-6 sm:max-w-lg sm:rounded-2xl sm:zoom-in-95 sm:slide-in-from-bottom-2",
           className,
         )}
         role="dialog"
@@ -70,7 +71,7 @@ export function Modal({ open, onClose, title, description, children, footer, cla
             <X className="size-4" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{children}</div>
+        {children ? <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{children}</div> : null}
         {footer ? <div className="flex flex-col-reverse gap-2 border-t border-border px-5 py-4 sm:flex-row sm:justify-end">{footer}</div> : null}
       </div>
     </div>

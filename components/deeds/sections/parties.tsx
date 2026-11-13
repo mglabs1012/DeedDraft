@@ -56,12 +56,12 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
         title="Parties"
       /> : null}
       {parties.length || compact ? (
-        <div className={compact ? "grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0" : "divide-y divide-border"}>
+        <div className={compact ? "grid divide-y divide-border xl:grid-cols-[repeat(3,minmax(0,1fr))] xl:divide-x xl:divide-y-0" : "divide-y divide-border"}>
           {order.map((role) => {
             const group = parties.filter((party) => party.role === role);
             if (role === "other" && !group.length) return null;
             return (
-              <div className="px-4 py-4 sm:px-5" key={role}>
+              <div className="min-w-0 px-4 py-4 sm:px-5" key={role}>
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="text-sm font-semibold text-primary">
                     {roles[role].en} <span className="font-devanagari font-normal text-muted-foreground">· {roles[role].hi.m}</span> <span className="font-normal text-muted-foreground">({group.length})</span>
@@ -71,9 +71,9 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
                   </button>
                 </div>
                 {group.length ? (
-                  <div className={compact ? "mt-3 grid gap-3" : "mt-3 grid gap-3 lg:grid-cols-2"}>
+                  <div className={compact ? "mt-3 grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] xl:grid-cols-1" : "mt-3 grid gap-3 lg:grid-cols-[repeat(2,minmax(0,1fr))]"}>
                     {group.map((party) => (
-                      <article className="flex gap-3 rounded-lg border border-border p-3 sm:p-4" key={party.id}>
+                      <article className="flex min-w-0 gap-3 rounded-lg border border-border p-3 sm:p-4" key={party.id}>
                         <span className="hidden size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary sm:grid">
                           {party.organisation ? <Building className="size-4" /> : <UserRound className="size-4" />}
                         </span>
@@ -84,7 +84,7 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
                             {[party.relativeName ? party.relation + " " + (party.relativeDeceased ? "Late " : "") + party.relativeName : "", party.age ? party.age + " yrs" : "", party.caste, party.occupation].filter(Boolean).join(" · ") || "Details pending"}
                           </p>
                           {party.address ? <p className="mt-1 text-sm leading-5 text-foreground/80">{party.address}</p> : null}
-                          <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                          <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-xs">
                             {party.aadhaar ? <span className="whitespace-nowrap rounded bg-secondary px-2 py-0.5 font-mono">Aadhaar {formatAadhaar(party.aadhaar, true)}</span> : null}
                             {party.pan ? <span className="whitespace-nowrap rounded bg-secondary px-2 py-0.5 font-mono">PAN {party.pan}</span> : null}
                             {party.gstin ? <span className="rounded bg-secondary px-2 py-0.5 font-mono">GSTIN {party.gstin}</span> : null}
@@ -92,7 +92,7 @@ export function PartiesSection({ deedType, parties, save, ai = null, documentNam
                             {party.representedBy ? <span className="rounded bg-amber-50 px-2 py-0.5 text-amber-800">Through representative</span> : null}
                             {party.documentIds.filter((id) => documentNames[id]).map((id) => (
                               <button className="inline-flex max-w-full items-center gap-1 rounded border border-border px-2 py-0.5 text-primary hover:bg-secondary" key={id} onClick={() => openDocument(id)} title="Open document" type="button">
-                                <FileText className="size-3 shrink-0" /><span className="truncate">{documentNames[id]}</span>
+                                <FileText className="size-3 shrink-0" /><span className="min-w-0 truncate">{documentNames[id]}</span>
                               </button>
                             ))}
                           </div>
