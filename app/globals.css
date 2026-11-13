@@ -87,6 +87,15 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* Keyboard users always see where they are; mouse clicks do not leave rings behind. */
+  :where(a, button, [role="button"], [role="tab"], summary):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* Buttons and links respond to a press. */
+  :where(button, [role="button"], a):not(:disabled) {
+    -webkit-tap-highlight-color: transparent;
+  }
   body {
     @apply bg-background text-foreground;
   }
@@ -94,5 +103,27 @@
     @apply font-sans;
     color-scheme: light;
     -webkit-text-size-adjust: 100%;
+  }
+}
+
+/* A section that has just appeared (a tab, a panel, a notice) eases in instead of popping. */
+@utility appear {
+  /* No fill mode: once it has played, the element is exactly as if it had never been animated (dialogs inside it layer normally). */
+  animation: appear 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes appear {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* People who ask their device for less motion get instant changes; progress spinners keep turning. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *:not(.animate-spin)::before,
+  *:not(.animate-spin)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

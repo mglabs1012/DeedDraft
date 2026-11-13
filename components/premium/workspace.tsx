@@ -52,16 +52,21 @@ export function PremiumWorkspace({ deed, initialData, initialDocuments, aiEnable
   const visible = useMemo(() => tabs.filter((tab) => (tab.id !== "payments" || config.consideration !== "none") && (tab.id !== "title" || config.titleChain !== "none")), [config]);
   const [tab, setTabState] = useState<PremiumTab>(initialTab && visible.some((item) => item.id === initialTab) ? initialTab : "overview");
   const [uploadRole, setUploadRole] = useState<PartyRole | null>(null);
+  // Once opened, the draft stays mounted (hidden) while other sections are used, so unsaved edits are kept.
+  const [draftSeen, setDraftSeen] = useState(tab === "draft");
   const w = useDeedWorkspace({ deed, initialData, initialDocuments, aiEnabled, onDraftsReady: () => go("draft") });
   const { data } = w;
   const readiness = useMemo(() => getReadiness(deed.deed_type, data, w.documents.length), [deed.deed_type, data, w.documents.length]);
   const checks = useMemo(() => finalChecks(deed.deed_type, data, ""), [deed.deed_type, data]);
   const ai = aiEnabled ? { deedId: deed.id, firmId } : null;
+  // The title may be renamed in the header; drafts and exports use the saved one.
+  const current = useMemo(() => ({ ...deed, title: w.savedTitle }), [deed, w.savedTitle]);
 
   function go(requested: PremiumTab) {
     // A check or AI finding can point at a section this deed type hides (e.g. payments on a gift deed).
     const next = visible.some((item) => item.id === requested) ? requested : requested === "payments" ? "terms" : "overview";
     setTabState(next);
+    if (next === "draft") setDraftSeen(true);
     // Keep the chosen section visible in the scrolling tab bar on phones.
     requestAnimationFrame(() => document.getElementById("premium-tab-" + next)?.scrollIntoView({ block: "nearest", inline: "center" }));
     try { window.history.replaceState(null, "", "?tab=" + next); } catch { /* URL sync is a convenience only */ }
@@ -84,7 +89,7 @@ export function PremiumWorkspace({ deed, initialData, initialDocuments, aiEnable
 
   return (
     <div className="space-y-5">
-      <WorkspaceHeader w={w} deed={deed} mode="premium" canSwitch />
+      <WorkspaceHeader w={w} deed={deed} mode="premium" canSwitch place={tab === "draft" ? "draft" : "workspace"} />
       <StatusArea w={w} deed={deed} aiEnabled={aiEnabled} uploadRole={uploadRole} onCloseUpload={() => setUploadRole(null)} showDocuments={false} />
 
       <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
@@ -107,16 +112,16 @@ export function PremiumWorkspace({ deed, initialData, initialDocuments, aiEnable
         <div className="min-w-0 space-y-5">
           <div><h2 className="text-lg font-semibold text-primary">{visible[index]?.label}</h2><p className="text-sm text-muted-foreground">{visible[index]?.hint}</p></div>
 
-          {tab === "overview" ? <div data-tour="premium-overview"><Overview deed={deed} data={data} readiness={readiness} checks={checks} documents={w.documents.length} drafts={w.drafts.length} aiEnabled={aiEnabled} onGo={go} /></div> : null}
+          {tab === "overview" ? <div data-tour="premium-overview" className="appear"><Overview deed={deed} data={data} readiness={readiness} checks={checks} documents={w.documents.length} drafts={w.drafts.length} aiEnabled={aiEnabled} onGo={go} /></div> : null}
 
-          {tab === "documents" ? <div className="space-y-4">
+          {tab === "documents" ? <div className="appear space-y-4">
             <PaperDropzone w={w} compact />
             <PersonUploads w={w} deed={deed} onOpen={setUploadRole} />
             <DocumentListFor w={w} aiEnabled={aiEnabled} open />
             <PaperReader w={w} />
           </div> : null}
 
-          <fieldset disabled={w.disabled || w.extracting > 0} className="min-w-0 space-y-5">
+          <fieldset key={tab} disabled={w.disabled || w.extracting > 0} className="appear min-w-0 space-y-5 empty:hidden">
             {tab === "parties" ? <PartiesSection deedType={deed.deed_type} parties={data.parties} save={w.save} ai={ai} documentNames={Object.fromEntries(w.documents.map((doc) => [doc.id, doc.file_name]))} /> : null}
             {tab === "properties" ? <>
               <PropertiesSection deedType={deed.deed_type} properties={data.properties} parties={data.parties} save={w.save} ai={ai} />
@@ -127,10 +132,11 @@ export function PremiumWorkspace({ deed, initialData, initialDocuments, aiEnable
             {tab === "terms" ? <TermsSection deedType={deed.deed_type} terms={data.terms} execution={data.execution} firmCity={firmCity} save={w.save} aiEnabled={aiEnabled} deedId={deed.id} deedLanguage={deed.language} /> : null}
           </fieldset>
 
-          {tab === "draft" ? <div className="space-y-5">
+          {draftSeen ? <div hidden={tab !== "draft"} className="space-y-5">
             {checks.some((check) => check.severity === "error") ? <p className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"><CircleAlert className="mt-0.5 size-4 shrink-0" />Fix the problems listed on the Overview before relying on this draft.</p> : null}
             <DraftRequest w={w} hasDrafts={w.drafts.length > 0} />
-            {w.drafts.length ? <StandardDraft deed={deed} data={data} firmName={firmName} firmCity={firmCity} aiEnabled={aiEnabled} drafts={w.drafts} onSaved={(draft) => w.setDrafts((current) => [draft, ...current])} onLocalized={(localized) => w.acceptData({ ...w.dataRef.current, localized })} /> : null}
+            {w.draftsError ? <p role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">{w.draftsError}<Button type="button" variant="outline" className="h-8" onClick={() => void w.fetchDrafts().catch(() => undefined)}>Retry</Button></p>
+              : w.drafts.length || !w.draftsReady ? <StandardDraft key={w.generation} active={tab === "draft"} ready={w.draftsReady} onDirtyChange={w.markUnsaved} deed={current} onEditDetails={(section) => go(section ?? "overview")} data={data} firmName={firmName} firmCity={firmCity} aiEnabled={aiEnabled} drafts={w.drafts} onSaved={(draft) => w.setDrafts((current) => [draft, ...current])} onLocalized={(localized) => w.acceptData({ ...w.dataRef.current, localized })} /> : null}
           </div> : null}
 
           <div className="flex items-center justify-between gap-3 border-t border-border pt-4">

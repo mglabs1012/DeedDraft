@@ -10,7 +10,7 @@ import { TemplateSearch } from "@/components/templates/template-search";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
 import { coreItems, libraryItems, type CatalogItem, type LibraryEntry } from "@/lib/templates/catalog";
 
-export function NewDeedForm({ library, initialType, initialTemplate, mode = "standard" }: { library: LibraryEntry[]; initialType?: DeedType; initialTemplate?: LibraryEntry; aiEnabled?: boolean; mode?: "standard" | "premium" }) {
+export function NewDeedForm({ library, initialType, initialTemplate, mode = "standard" }: { library: LibraryEntry[]; initialType?: DeedType; initialTemplate?: LibraryEntry; mode?: "standard" | "premium" }) {
   const router = useRouter();
   const creating = useRef(false);
   const [selected, setSelected] = useState<string | null>(null);

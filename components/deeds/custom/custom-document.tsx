@@ -11,10 +11,6 @@ import type { CustomDoc } from "@/lib/schemas/deed-data";
 import type { LibraryEntry } from "@/lib/templates/catalog";
 import { formFor, type FormField } from "@/lib/templates/forms";
 
-export function missingRequired(entry: LibraryEntry, answers: Record<string, string>) {
-  return formFor(entry).flatMap((section) => section.fields.filter((item) => item.required && !answers[item.key]?.trim()).map((item) => section.title + ": " + item.label));
-}
-
 /* ------------------------------------------------------------- Details form */
 
 export function CustomDetailsForm({ deedId, entry, custom, onSaved, onNext }: { deedId: string; entry: LibraryEntry; custom: CustomDoc; onSaved: (answers: Record<string, string>) => void; onNext: () => void }) {

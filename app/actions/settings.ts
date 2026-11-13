@@ -6,6 +6,7 @@ import { updateProfileSchema } from "@/lib/schemas/deed-data";
 import { updateFirmSchema } from "@/lib/schemas/settings";
 import { requireWorkspace } from "@/lib/workspace";
 import { userMessage } from "@/lib/errors";
+import { logActivity } from "@/lib/activity.server";
 
 export async function updateFirm(input: unknown) {
   const parsed = updateFirmSchema.safeParse(input);
@@ -27,9 +28,7 @@ export async function updateFirm(input: unknown) {
 
   if (error) return { error: userMessage(error) };
 
-  await workspace.supabase.from("activity_log").insert({
-    firm_id: workspace.firm.id,
-    user_id: workspace.user.id,
+  logActivity(workspace, {
     action: "updated_firm_settings",
     details: {},
   });

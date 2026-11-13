@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Toaster } from "sonner";
+import { ConfirmHost } from "@/components/ui/confirm";
 import "./globals.css";
 
 const inter = localFont({
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col">
         {children}
+        <ConfirmHost />
         <Toaster closeButton position="bottom-right" richColors visibleToasts={3} duration={4500} toastOptions={{ className: "shadow-lg", style: { borderRadius: "12px" } }} />
       </body>
     </html>

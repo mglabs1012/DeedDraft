@@ -34,5 +34,5 @@ export default async function DeedDetailPage({ params, searchParams }: { params:
     const tab = typeof query.tab === "string" && isPremiumTab(query.tab) ? query.tab : undefined;
     return <PremiumWorkspace key="premium" {...common} firmId={workspace.firm.id} initialTab={tab} />;
   }
-  return <StandardWorkspace key="standard" {...common} template={getLibraryEntry(initialData.custom?.templateId) ?? null} />;
+  return <StandardWorkspace key="standard" {...common} template={getLibraryEntry(initialData.custom?.templateId) ?? null} initialView={query.tab === "draft" ? "draft" : "workspace"} />;
 }

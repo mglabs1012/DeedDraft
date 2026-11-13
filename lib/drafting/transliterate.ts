@@ -180,6 +180,8 @@ export type OfflineConversion = {
   confident: boolean;
 };
 
+const ROMAN_ORDINALS: Record<string, string> = { I: "प्रथम", II: "द्वितीय", III: "तृतीय", IV: "चतुर्थ", V: "पंचम" };
+
 /** Converts one value into the draft language's script without AI. */
 export function convertOffline(value: string, language: DraftLanguage): OfflineConversion {
   const parts = value.split(TOKEN);
@@ -206,12 +208,18 @@ export function convertOffline(value: string, language: DraftLanguage): OfflineC
 
   for (let t = 0; t < tokens.length; ) {
     const { word } = tokens[t];
+    // Roman numerals are numbers, not words: "Ajmer (I)" is the first Sub-Registrar office → "अजमेर (प्रथम)"; elsewhere ("Phase II") they stay as typed.
+    if (toHindi && word in ROMAN_ORDINALS && !/^\./.test(parts[tokens[t].index + 1] ?? "")) {
+      if (/\($/.test(parts[tokens[t].index - 1] ?? "") && /^\)/.test(parts[tokens[t].index + 1] ?? "")) parts[tokens[t].index] = ROMAN_ORDINALS[word];
+      t += 1;
+      continue;
+    }
     if (codeChunks.has(tokens[t].index) || /\d/.test(word) || (toHindi ? /^[A-Z]{2,6}$/.test(word) && !(word.toLowerCase() in words) : !DEVANAGARI.test(word))) { t += 1; continue; }
-    // Longest phrase starting here (separators between phrase words must be plain spaces or dots).
+    // Longest phrase starting here (separators between phrase words must be plain spaces, dots or a hyphen: "Sub-Registrar").
     const phrase = phraseList.find(([list]) => list.every((item, offset) => {
       const token = tokens[t + offset];
       if (!token || codeChunks.has(token.index) || key(token.word) !== (toHindi ? item.replace(/[.’']/g, "") : item)) return false;
-      return offset === 0 || /^[\s.]*$/.test(parts[token.index - 1]);
+      return offset === 0 || /^[\s.-]*$/.test(parts[token.index - 1]);
     }));
     if (phrase) {
       const length = phrase[0].length;

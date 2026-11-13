@@ -2,7 +2,6 @@ import Link from "next/link";
 import { Crown, FileText } from "lucide-react";
 
 import { NewDeedForm } from "@/components/deeds/new-deed-form";
-import { isAiConfigured } from "@/lib/ai/claude";
 import { isDeedType } from "@/lib/deed-types";
 import { getLibraryEntry, libraryIndex } from "@/lib/templates/library.server";
 import { cn } from "@/lib/utils";
@@ -33,7 +32,7 @@ export default async function NewDeedPage({ searchParams }: { searchParams: Prom
       </div>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{modes[mode].text} You can switch a deed between modes later; nothing is lost.</p>
       <section className="mt-6 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-7">
-        <NewDeedForm key={mode} mode={mode} aiEnabled={isAiConfigured()} initialTemplate={initialTemplate} initialType={initialType} library={libraryIndex} />
+        <NewDeedForm key={mode} mode={mode} initialTemplate={initialTemplate} initialType={initialType} library={libraryIndex} />
       </section>
     </div>
   );

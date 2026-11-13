@@ -5,7 +5,9 @@ import { z } from "zod";
 import { editableDraftSchema } from "@/lib/drafting/editable";
 import { requireWorkspace } from "@/lib/workspace";
 import type { Json } from "@/types/database";
+import { logActivity } from "@/lib/activity.server";
 
+/** `content` is null for older versions in a list; their text is loaded when chosen (loadDraftVersion). */
 export type SavedDraft = { id: string; language: "hindi" | "english"; version: number; note: string | null; created_at: string; content: unknown };
 
 const saveSchema = z.object({
@@ -19,26 +21,33 @@ export async function saveDraftVersion(input: unknown): Promise<{ error?: string
   const parsed = saveSchema.safeParse(input);
   if (!parsed.success) return { error: "The draft could not be saved (invalid content)." };
   const workspace = await requireWorkspace();
-  const { data: deed } = await workspace.supabase.from("deeds").select("id").eq("id", parsed.data.deedId).eq("firm_id", workspace.firm.id).maybeSingle();
+  const { deedId, draft, note } = parsed.data;
+  const newest = () => workspace.supabase.from("deed_drafts").select("version").eq("deed_id", deedId).eq("firm_id", workspace.firm.id).eq("language", draft.language).order("version", { ascending: false }).limit(1);
+  // The deed check and the latest version number are read together.
+  const [{ data: deed }, { data: latest, error: readError }] = await Promise.all([
+    workspace.supabase.from("deeds").select("id").eq("id", deedId).eq("firm_id", workspace.firm.id).maybeSingle(),
+    newest(),
+  ]);
   if (!deed) return { error: "Deed not found." };
-
-  const { data: latest, error: readError } = await workspace.supabase
-    .from("deed_drafts")
-    .select("version")
-    .eq("deed_id", deed.id)
-    .eq("language", parsed.data.draft.language)
-    .order("version", { ascending: false })
-    .limit(1);
   if (readError) return { error: readError.code === "42P01" ? "Draft versions need database migration 0004. Ask your administrator to run it." : readError.message };
 
-  const version = (latest?.[0]?.version ?? 0) + 1;
-  const { data, error } = await workspace.supabase
-    .from("deed_drafts")
-    .insert({ deed_id: deed.id, firm_id: workspace.firm.id, language: parsed.data.draft.language, version, content: parsed.data.draft as unknown as Json, note: parsed.data.note || null, created_by: workspace.user.id })
-    .select("id, language, version, note, created_at, content")
-    .single();
-  if (error || !data) return { error: error?.code === "23505" ? "Someone saved a newer version at the same time. Reload and try again." : error?.message ?? "Could not save the draft." };
+  let version = (latest?.[0]?.version ?? 0) + 1;
+  let data: Omit<SavedDraft, "content"> | null = null;
+  for (let attempt = 0; attempt < 3 && !data; attempt += 1) {
+    const saved = await workspace.supabase
+      .from("deed_drafts")
+      .insert({ deed_id: deed.id, firm_id: workspace.firm.id, language: draft.language, version, content: draft as unknown as Json, note: note || null, created_by: workspace.user.id })
+      .select("id, language, version, note, created_at")
+      .single();
+    if (saved.data) { data = saved.data; break; }
+    // Another save took this version number at the same moment: take the next one.
+    if (saved.error?.code !== "23505") return { error: saved.error?.message ?? "Could not save the draft." };
+    const { data: again } = await newest();
+    version = Math.max(version, again?.[0]?.version ?? 0) + 1;
+  }
+  if (!data) return { error: "Someone saved a newer version at the same time. Try again." };
 
-  await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, deed_id: deed.id, user_id: workspace.user.id, action: "saved_draft_version", details: { language: data.language, version } });
-  return { draft: data as SavedDraft };
+  logActivity(workspace, { deed_id: deed.id, action: "saved_draft_version", details: { language: data.language, version: data.version } });
+  // The text is what was just sent; it is not read back from the database.
+  return { draft: { ...data, content: draft } };
 }

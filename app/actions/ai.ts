@@ -8,6 +8,7 @@ import { draftingContext } from "@/lib/ai/memory.server";
 import { identityWarnings, normaliseClauses, normaliseExtraction, normaliseParty, normaliseProperty, normaliseReview, type Extraction, type ReviewIssue } from "@/lib/ai/parse";
 import { clausePrompt, draftChatPrompt, draftReviewPrompt, extractionFromTextPrompt, partyDocsPrompt, propertyDocsPrompt, reviewPrompt } from "@/lib/ai/prompts";
 import { relevantFacts } from "@/lib/ai/facts";
+import { createRedactor } from "@/lib/ai/redact";
 import { getDeedType, type DeedType } from "@/lib/deed-types";
 import { getReadiness } from "@/lib/drafting";
 import { draftForAi, editableDraftSchema, validOperations, type EditOperation } from "@/lib/drafting/editable";
@@ -239,6 +240,7 @@ export async function reviewDeed(input: unknown): Promise<Result<{ issues: Revie
     ]);
     const { data: raw, usage } = await generateJson({
       temperature: 0,
+      reasoning: true,
       system: reviewPrompt(deed.deed_type),
       cachedContext: memory.text || undefined,
       schema: reviewSchema,
@@ -384,20 +386,24 @@ export async function chatEditDraft(input: unknown): Promise<Result<{ reply: str
 
   try {
     const memory = await draftingContext(workspace, deed.deed_type, draft.language, { references: Boolean(useReferences) });
-    const turns = [...history, { role: "user" as const, content: message }];
+    // Aadhaar, PAN and phone numbers go to the AI as tokens and are put back in its answer.
+    const ids = createRedactor();
+    const turns = [...history, { role: "user" as const, content: message }].map((turn) => ({ ...turn, content: ids.redact(turn.content) }));
     while (turns.length && turns[0].role !== "user") turns.shift();
     const { data: raw, usage } = await generateJson<{ reply?: unknown; operations?: unknown }>({
       system: draftChatPrompt(deed.deed_type, draft.language),
-      cachedContext: [memory.text, "MATTER DATA (identity numbers removed):\n" + JSON.stringify(redact(parseDeedData(deed.data), deed.deed_type)), "CLIENT REMARKS:\n" + (deed.remarks ?? ""), "CURRENT DRAFT:\n" + draftForAi(draft)].filter(Boolean).join("\n\n"),
+      cachedContext: [memory.text, "MATTER DATA (identity numbers removed):\n" + JSON.stringify(redact(parseDeedData(deed.data), deed.deed_type)), "CLIENT REMARKS:\n" + ids.redact(deed.remarks ?? ""), "CURRENT DRAFT (identity numbers appear as ⟦ID1⟧ tokens; keep tokens exactly as they are):\n" + ids.redact(draftForAi(draft))].filter(Boolean).join("\n\n"),
       content: turns.map((turn) => ({ role: turn.role, content: [{ text: turn.content }] })),
       schema: chatReplySchema,
       name: "propose_changes",
       description: "Reply and propose edits to the draft",
       maxTokens: 8000,
       temperature: 0.2,
+      reasoning: true,
     });
-    const operations = validOperations(draft, Array.isArray(raw.operations) ? raw.operations : []);
-    const reply = typeof raw.reply === "string" && raw.reply.trim() ? raw.reply.trim().slice(0, 4000) : operations.length ? "Proposed " + operations.length + " change(s)." : "No changes proposed.";
+    const restored = (Array.isArray(raw.operations) ? raw.operations : []).map((operation: unknown) => (operation && typeof operation === "object" && typeof (operation as { text?: unknown }).text === "string" ? { ...operation, text: ids.restore((operation as { text: string }).text) } : operation));
+    const operations = validOperations(draft, restored, message);
+    const reply = typeof raw.reply === "string" && raw.reply.trim() ? ids.restore(raw.reply.trim()).slice(0, 4000) : operations.length ? "Proposed " + operations.length + " change(s)." : "No changes proposed.";
     await Promise.all([
       remember(workspace, deed.id, "user", message, { language: draft.language }),
       remember(workspace, deed.id, "assistant", reply, { operations: operations.length }),
@@ -419,17 +425,19 @@ export async function reviewDraftText(input: unknown): Promise<Result<{ issues: 
   if (limited) return { error: limited };
   try {
     const memory = await draftingContext(workspace, deed.deed_type, parsed.data.draft.language, { references: false });
+    const ids = createRedactor();
     const { data: raw, usage } = await generateJson({
       system: draftReviewPrompt(deed.deed_type),
       cachedContext: memory.text || undefined,
-      content: "MATTER DATA:\n" + JSON.stringify(redact(parseDeedData(deed.data), deed.deed_type)) + "\n\nDRAFT:\n" + draftForAi(parsed.data.draft),
+      content: "MATTER DATA (identity numbers removed):\n" + JSON.stringify(redact(parseDeedData(deed.data), deed.deed_type)) + "\n\nDRAFT (identity numbers appear as ⟦ID1⟧ tokens; they are correct, do not report them):\n" + ids.redact(draftForAi(parsed.data.draft)),
       schema: reviewSchema,
       name: "save_review",
       description: "Save the review findings",
       maxTokens: 6000,
       temperature: 0,
+      reasoning: true,
     });
-    const issues = normaliseReview(raw);
+    const issues = normaliseReview(raw).map((issue) => ({ ...issue, message: ids.restore(issue.message) }));
     await Promise.all([
       remember(workspace, deed.id, "assistant", "Reviewed the draft: " + issues.length + " issue(s).", { review: true }),
       logUsage(workspace, deed.id, "ai_reviewed_draft", usage, { issues: issues.length }),

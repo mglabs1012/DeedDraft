@@ -1,23 +1,31 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Languages, LoaderCircle, TriangleAlert } from "lucide-react";
+import { Languages, LoaderCircle, Pencil, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { DraftStudio } from "@/components/deeds/draft-studio";
 import type { SavedDraft } from "@/app/actions/drafts";
 import { saveConversions } from "@/app/actions/language";
 import { Button } from "@/components/ui/button";
-import type { DraftLanguage } from "@/lib/deed-types";
+import type { DraftLanguage, SectionId } from "@/lib/deed-types";
 import { generateEditable } from "@/lib/drafting";
+import { draftBasis } from "@/lib/drafting/basis";
 import { finalChecks } from "@/lib/drafting/checks";
 import type { EditableDraft } from "@/lib/drafting/editable";
 import { usedConversions } from "@/lib/drafting/localize";
 import type { DeedData, Localized } from "@/lib/schemas/deed-data";
 import type { Deed } from "@/types/database";
 
-export function StandardDraft({ deed, data, firmName, firmCity, aiEnabled, drafts, onSaved, onLocalized }: {
+export function StandardDraft({ deed, data, firmName, firmCity, aiEnabled, drafts, onSaved, onLocalized, onEditDetails, onDirtyChange, active = true, ready = true }: {
   deed: Deed; data: DeedData; firmName: string; firmCity: string; aiEnabled: boolean;
   drafts: SavedDraft[]; onSaved: (draft: SavedDraft) => void; onLocalized: (localized: Localized) => void;
+  /** Opens the details for correction, at the section a check points to. */
+  onEditDetails: (section?: SectionId) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  /** False while the draft is kept open in the background (the user is correcting details). */
+  active?: boolean;
+  /** False while the saved versions are still loading. */
+  ready?: boolean;
 }) {
   const languages = useMemo(() => (["hindi", "english"] as const).filter((language) => drafts.some((draft) => draft.language === language)), [drafts]);
   const generated = useMemo(() => Object.fromEntries(["hindi", "english"].map((language) => [language, () => {
@@ -26,17 +34,21 @@ export function StandardDraft({ deed, data, firmName, firmCity, aiEnabled, draft
     if (custom) return { language: lang, blocks: [{ id: "title", kind: "title", text: custom.title }, ...custom.paragraphs.map((text, i) => ({ id: "p" + i, kind: "para", text }))] } as EditableDraft;
     return generateEditable({ type: deed.deed_type, title: deed.title, referenceNo: deed.reference_no, data, firmName, firmCity }, lang);
   }])) as Record<DraftLanguage, () => EditableDraft>, [data, deed, firmName, firmCity]);
+  const basis = useMemo(() => (data.custom ? undefined : draftBasis({ type: deed.deed_type, title: deed.title, referenceNo: deed.reference_no, data, firmName, firmCity })), [data, deed, firmName, firmCity]);
   const checks = useMemo(() => finalChecks(deed.deed_type, data, ""), [deed.deed_type, data]);
   const errors = checks.filter((check) => check.severity === "error");
-  if (!languages.length) return <p className="py-10 text-sm text-muted-foreground">No saved draft yet. Prepare a draft from Papers &amp; details.</p>;
-  return <div data-tour="draft-review" className="space-y-4">
-    <p className="text-sm leading-6 text-muted-foreground">Read the draft against the papers before signing or registration. Edit any text directly, or ask the assistant to add, keep or remove clauses. Changes to the people, property or payments need a new version from Papers &amp; details.</p>
+  if (!languages.length) return <p role="status" className="py-10 text-sm text-muted-foreground">{ready ? "No saved draft yet. Prepare a draft first." : "Opening draft…"}</p>;
+  return <div data-tour={active ? "draft-review" : undefined} className="appear space-y-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <p className="w-full text-sm leading-6 text-muted-foreground sm:w-auto sm:min-w-0 sm:flex-1">Read the draft against the papers before signing or registration. Edit any text, table or signature directly, or ask the assistant to add, keep or remove clauses.</p>
+      <Button type="button" variant="outline" className="h-9" onClick={() => onEditDetails()}><Pencil className="size-3.5" /> Correct details</Button>
+    </div>
     {checks.length ? <details className={"rounded-lg border p-3 text-sm " + (errors.length ? "border-destructive/30 bg-destructive/5" : "border-amber-200 bg-amber-50/50")} open={errors.length > 0}>
       <summary className="flex cursor-pointer items-center gap-2 font-medium"><TriangleAlert className={"size-4 " + (errors.length ? "text-destructive" : "text-amber-700")} />{errors.length ? errors.length + " problem" + (errors.length === 1 ? "" : "s") + " to fix" : ""}{errors.length && checks.length > errors.length ? " · " : ""}{checks.length > errors.length ? (checks.length - errors.length) + " point" + (checks.length - errors.length === 1 ? "" : "s") + " to review" : ""}</summary>
-      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs leading-5">{checks.map((check) => <li key={check.id} className={check.severity === "error" ? "text-destructive" : undefined}>{check.message}</li>)}</ul>
+      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-xs leading-5">{checks.map((check) => <li key={check.id} className={check.severity === "error" ? "text-destructive" : undefined}>{check.message} <button type="button" className="whitespace-nowrap font-medium underline underline-offset-2" onClick={() => onEditDetails(check.tab)}>Fix</button></li>)}</ul>
     </details> : null}
     <NameConversions deedId={deed.id} data={data} firmCity={firmCity} languages={languages} onLocalized={onLocalized} />
-    <DraftStudio deedId={deed.id} languages={[...languages]} generated={generated} saved={drafts} aiEnabled={aiEnabled} onSaved={onSaved} exportTitle={deed.reference_no + " - " + deed.title} />
+    <DraftStudio deedId={deed.id} languages={[...languages]} generated={generated} saved={drafts} aiEnabled={aiEnabled} onSaved={onSaved} exportTitle={deed.reference_no + " - " + deed.title} currentBasis={basis} onEditDetails={() => onEditDetails()} onDirtyChange={onDirtyChange} />
   </div>;
 }
 
@@ -53,7 +65,7 @@ function NameConversions({ deedId, data, firmCity, languages, onLocalized }: { d
     if (result.error !== undefined) return void toast.error(result.error);
     onLocalized(result.localized);
     setEdits({});
-    toast.success("Spellings saved", { description: "They are used in every new version and remembered for this firm's next deeds. Choose Versions → Regenerate from matter data to see them now.", duration: 6000 });
+    toast.success("Spellings saved", { description: "They are used in every new version and remembered for this firm's next deeds. Choose Rebuild from details to see them in this draft.", duration: 6000 });
   });
   return <details className="rounded-lg border border-border bg-card text-sm">
     <summary className="flex cursor-pointer flex-wrap items-center gap-2 px-4 py-3 font-medium text-primary"><Languages className="size-4" /> Names in the draft language <span className="font-normal text-muted-foreground">· {entries.length} written {language === "hindi" ? "in Hindi" : "in English"} — check spellings</span></summary>

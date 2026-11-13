@@ -35,6 +35,8 @@ type Lang = "hindi" | "english";
 const fontFor = (lang: Lang) => (lang === "hindi"
   ? { ascii: "Times New Roman", hAnsi: "Times New Roman", cs: "Nirmala UI", eastAsia: "Nirmala UI" }
   : { ascii: "Times New Roman", hAnsi: "Times New Roman", cs: "Mangal", eastAsia: "Times New Roman" });
+// Complex-script (Devanagari) text is tagged Hindi in both drafts, so Word shapes, proofs and picks fonts correctly.
+const languageFor = (lang: Lang) => ({ value: lang === "hindi" ? "hi-IN" : "en-IN", bidirectional: "hi-IN" });
 const sizeFor = (lang: Lang, points: number) => ({ size: points * 2, sizeComplexScript: (lang === "hindi" ? points + 1 : points) * 2 });
 
 const entities: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&nbsp;": " " };
@@ -52,7 +54,7 @@ function runs(html: string, lang: Lang, style: RunStyle = {}): TextRun[] {
     if (part === "</strong>") { bold = false; continue; }
     if (/^<br/.test(part)) { out.push(new TextRun({ break: 1 })); continue; }
     if (part.startsWith("<")) continue;
-    out.push(new TextRun({ text: decode(part), bold: bold || style.bold, boldComplexScript: bold || style.bold, underline: style.underline ? {} : undefined, font: fontFor(lang), color: style.color, ...sizeFor(lang, style.points ?? (lang === "hindi" ? 12.5 : 12)) }));
+    out.push(new TextRun({ text: decode(part), bold: bold || style.bold, boldComplexScript: bold || style.bold, underline: style.underline ? {} : undefined, font: fontFor(lang), language: languageFor(lang), color: style.color, ...sizeFor(lang, style.points ?? (lang === "hindi" ? 12.5 : 12)) }));
   }
   return out;
 }
@@ -148,7 +150,8 @@ function children(doc: DraftDocument, numbering: { next: () => number }) {
         break;
       }
       case "table":
-        out.push(table(block.head, block.rows.map((row) => row.map((value) => (typeof value === "string" ? value.replace(/&/g, "&amp;").replace(/</g, "&lt;") : value.value))), lang, block.widths, false, true));
+        // A two-column table without headings is a key–value schedule: labels in bold.
+        out.push(table(block.head, block.rows.map((row) => row.map((value) => (typeof value === "string" ? value.replace(/&/g, "&amp;").replace(/</g, "&lt;") : value.value))), lang, block.widths, !block.head && block.rows.every((row) => row.length === 2), true));
         out.push(new Paragraph({ spacing: { after: 160 }, children: [] }));
         break;
       case "boundaries":
@@ -167,7 +170,7 @@ function children(doc: DraftDocument, numbering: { next: () => number }) {
 }
 
 function footer(lang: Lang, note?: string) {
-  const runOptions = { font: fontFor(lang), ...sizeFor(lang, 9), color: "666666" };
+  const runOptions = { font: fontFor(lang), language: languageFor(lang), ...sizeFor(lang, 9), color: "666666" };
   return new Footer({
     children: [
       new Paragraph({
@@ -205,6 +208,3 @@ export async function draftToDocxBlob(documents: DraftDocument[], options: { tit
   return Packer.toBlob(buildDocx(documents, options));
 }
 
-export async function draftToDocxBuffer(documents: DraftDocument[], options: { title: string; footer?: string }) {
-  return Packer.toBuffer(buildDocx(documents, options));
-}

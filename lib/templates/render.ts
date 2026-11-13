@@ -18,11 +18,4 @@ export function customDraftHtml({ drafts, title, referenceNo, footer }: { drafts
   return renderDraftHtml({ title: referenceNo + " · " + title, documents, footer });
 }
 
-/** The template itself as a draft, for filling by hand when AI is not set up. */
-export function templateAsDraft(title: string, text: string): CustomDraft {
-  return { title, paragraphs: text.split("\n").slice(text.split("\n")[0]?.trim().toUpperCase() === title.toUpperCase() ? 1 : 0), edited: false };
-}
-
-/** Paragraphs ⇄ editable text (blank line between paragraphs). */
-export const draftToText = (draft: CustomDraft) => draft.paragraphs.join("\n\n");
 export const textToParagraphs = (text: string) => text.split(/\n\s*\n/).map((item) => item.replace(/\s*\n\s*/g, " ").trim()).filter(Boolean);

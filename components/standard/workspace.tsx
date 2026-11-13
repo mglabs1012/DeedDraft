@@ -1,11 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, Plus, UploadCloud } from "lucide-react";
+import { toast } from "sonner";
 import type { WorkspaceDocument } from "@/app/actions/upload";
 import { PartiesSection } from "@/components/deeds/sections/parties";
 import { HelpTip } from "@/components/guided-tour";
+import type { SectionId } from "@/lib/deed-types";
 import type { DeedData, PartyRole } from "@/lib/schemas/deed-data";
 import type { LibraryEntry } from "@/lib/templates/catalog";
 import { UPLOAD_ACCEPT } from "@/lib/uploads/policy";
@@ -22,19 +24,39 @@ const CustomDetailsForm = dynamic(() => import("@/components/deeds/custom/custom
 const StandardDraft = dynamic(() => import("./draft").then((m) => m.StandardDraft), { loading: () => <p className="py-12 text-sm text-muted-foreground">Opening draft…</p> });
 
 /** Standard Mode: one guided page — papers, people, property and terms, then the draft. */
-export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabled, firmCity, firmName, template }: {
+export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabled, firmCity, firmName, template, initialView = "workspace" }: {
   deed: Deed; initialData: DeedData; initialDocuments: WorkspaceDocument[]; aiEnabled: boolean;
-  firmCity: string; firmName: string; template: LibraryEntry | null;
+  firmCity: string; firmName: string; template: LibraryEntry | null; initialView?: "workspace" | "draft";
 }) {
-  const [view, setView] = useState<"workspace" | "draft">("workspace");
+  const [view, setViewState] = useState<"workspace" | "draft">(initialView);
+  // Once opened, the draft stays mounted (hidden) while details are corrected, so unsaved edits are kept.
+  const [draftSeen, setDraftSeen] = useState(initialView === "draft");
   const [details, setDetails] = useState(false);
   const [uploadRole, setUploadRole] = useState<PartyRole | null>(null);
   const w = useDeedWorkspace({ deed, initialData, initialDocuments, aiEnabled, onDraftsReady: () => setView("draft") });
   const { data } = w;
+  // The title may be renamed in the header; drafts and exports use the saved one.
+  const current = useMemo(() => ({ ...deed, title: w.savedTitle }), [deed, w.savedTitle]);
+
+  function setView(next: "workspace" | "draft") {
+    setViewState(next);
+    if (next === "draft") setDraftSeen(true);
+    try { window.history.replaceState(null, "", next === "draft" ? "?tab=draft" : window.location.pathname); } catch { /* URL sync is a convenience only */ }
+  }
+  // Opened on the draft (a link, or switching from Premium's Draft tab): load the saved versions.
+  useEffect(() => { if (initialView === "draft") void w.fetchDrafts().then((all) => { if (!all.length) setViewState("workspace"); }, (error: unknown) => { setViewState("workspace"); toast.error(error instanceof Error ? error.message : "Draft versions could not be loaded."); }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** From the draft back to the details, opened at the part a check points to. */
+  function editDetails(section?: SectionId) {
+    setView("workspace");
+    const target = section === "parties" ? "step-people" : section === "documents" ? "step-papers" : section ? "step-details" : "step-people";
+    if (target === "step-details") setDetails(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" })));
+  }
 
   return (
     <div className="space-y-7">
-      <WorkspaceHeader w={w} deed={deed} mode="standard" canSwitch={!data.custom}>
+      <WorkspaceHeader w={w} deed={deed} mode="standard" canSwitch={!data.custom} place={view === "draft" ? "draft" : "overview"}>
         <div role="tablist" aria-label="Deed sections" className="mt-3 flex gap-1 border-b border-border text-sm">
           <button type="button" role="tab" aria-selected={view === "workspace"} className={cn("-mb-px border-b-2 px-3 py-2.5", view === "workspace" ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground hover:text-primary")} onClick={() => setView("workspace")}>Papers &amp; details</button>
           <button type="button" role="tab" aria-selected={view === "draft"} disabled={w.disabled} className={cn("-mb-px border-b-2 px-3 py-2.5", view === "draft" ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground hover:text-primary")} onClick={w.openDrafts}>Draft{w.drafts.length ? " (" + new Set(w.drafts.map((draft) => draft.language)).size + ")" : ""}</button>
@@ -43,8 +65,10 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
 
       <StatusArea w={w} deed={deed} aiEnabled={aiEnabled} uploadRole={uploadRole} onCloseUpload={() => setUploadRole(null)} />
 
-      {view === "draft" ? <StandardDraft deed={deed} data={data} firmName={firmName} firmCity={firmCity} aiEnabled={aiEnabled} drafts={w.drafts} onSaved={(draft) => w.setDrafts((current) => [draft, ...current])} onLocalized={(localized) => w.acceptData({ ...w.dataRef.current, localized })} /> : <>
-        <section data-tour="paper-upload" aria-labelledby="upload-heading" className="space-y-4">
+      {draftSeen ? <div hidden={view !== "draft"}><StandardDraft key={w.generation} active={view === "draft"} ready={w.draftsReady} deed={current} onEditDetails={editDetails} onDirtyChange={w.markUnsaved} data={data} firmName={firmName} firmCity={firmCity} aiEnabled={aiEnabled} drafts={w.drafts} onSaved={(draft) => w.setDrafts((current) => [draft, ...current])} onLocalized={(localized) => w.acceptData({ ...w.dataRef.current, localized })} /></div> : null}
+
+      {view === "workspace" ? <div className="appear space-y-7">
+        <section id="step-papers" data-tour="paper-upload" aria-labelledby="upload-heading" className="scroll-mt-20 space-y-4">
           <Step n={1} title="Add the papers" hint="Old deeds and property papers here; each person's ID proofs in their own box." />
           <PaperDropzone w={w} />
           <PersonUploads w={w} deed={deed} onOpen={setUploadRole} />
@@ -52,12 +76,12 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
 
         <PaperReader w={w} />
 
-        <fieldset data-tour="party-details" disabled={w.disabled || w.extracting > 0} className="min-w-0">
+        <fieldset id="step-people" data-tour="party-details" disabled={w.disabled || w.extracting > 0} className="min-w-0 scroll-mt-20">
           <Step n={2} title="Check the people" hint="Filled from the papers where possible. Every name, relation, age, address and ID number goes into the deed exactly as shown; add anyone missing." />
           <PartiesSection compact deedType={deed.deed_type} parties={data.parties} save={w.save} documentNames={Object.fromEntries(w.documents.map((doc) => [doc.id, doc.file_name]))} />
         </fieldset>
 
-        <section className="space-y-3">
+        <section id="step-details" className="scroll-mt-20 space-y-3">
           <Step n={3} title="Property, payment & terms" hint="The property schedule, earlier title history and terms of this deed." />
           <button type="button" aria-expanded={details} onClick={() => setDetails(!details)} className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left text-sm transition hover:border-primary/35 sm:px-5">
             <span className="min-w-0"><span className="block font-medium text-primary">{details ? "Hide" : "Review"} property, title history &amp; terms</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{[data.properties.length + " propert" + (data.properties.length === 1 ? "y" : "ies"), data.titleChain.length + " title entr" + (data.titleChain.length === 1 ? "y" : "ies"), data.consideration.total ? "₹" + data.consideration.total.toLocaleString("en-IN") : ""].filter(Boolean).join(" · ")}{data.properties.length ? "" : " — add the property before drafting"}</span></span>
@@ -81,7 +105,7 @@ export function StandardWorkspace({ deed, initialData, initialDocuments, aiEnabl
           <Step n={4} title="Prepare the draft" hint="Optional instructions, then choose Hindi, English or both." />
           <DraftRequest w={w} hasDrafts={w.drafts.length > 0} />
         </div>
-      </>}
+      </div> : null}
     </div>
   );
 }

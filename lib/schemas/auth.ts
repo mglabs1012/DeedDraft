@@ -37,5 +37,3 @@ export const updatePasswordSchema = z
     message: "Passwords do not match.",
   });
 
-export type SignInInput = z.infer<typeof signInSchema>;
-export type SignUpInput = z.infer<typeof signUpSchema>;

@@ -12,6 +12,7 @@ import type { SaveSection } from "@/components/deeds/sections/shared";
 import type { DeedData } from "@/lib/schemas/deed-data";
 import { streamStandardDraft } from "@/lib/drafting/client-stream";
 import type { Deed } from "@/types/database";
+import { confirmDialog } from "@/components/ui/confirm";
 import { useUploadEngine } from "./use-upload-engine";
 
 export type DraftLanguageChoice = "hindi" | "english" | "both";
@@ -31,7 +32,7 @@ export function useDeedWorkspace({ deed, initialData, initialDocuments, aiEnable
   const acceptData = (next: DeedData) => { dataRef.current = next; setData(next); };
   const [documents, setDocuments] = useState(initialDocuments);
   const [title, setTitle] = useState(deed.title);
-  const savedTitle = useRef(deed.title);
+  const [savedTitle, setSavedTitle] = useState(deed.title);
   const [instructions, setInstructions] = useState(deed.remarks ?? "");
   const [savedInstructions, setSavedInstructions] = useState(deed.remarks ?? "");
   const [busy, setBusy] = useState("");
@@ -47,6 +48,14 @@ export function useDeedWorkspace({ deed, initialData, initialDocuments, aiEnable
   const sourceRequest = useRef(0);
   const [drafts, setDrafts] = useState<SavedDraft[]>([]);
   const draftsLoaded = useRef(false);
+  /** True once the saved versions have been read (or a draft was just prepared). */
+  const [draftsReady, setDraftsReady] = useState(false);
+  const [draftsError, setDraftsError] = useState("");
+  /** Counts prepared drafts: the open draft view starts afresh on the new version. */
+  const [generation, setGeneration] = useState(0);
+  /** Whether the open draft has edits not yet saved as a version (set by the draft editor). */
+  const unsavedDraft = useRef(false);
+  const markUnsaved = (dirty: boolean) => { unsavedDraft.current = dirty; };
   const [language, setLanguage] = useState<DraftLanguageChoice>(deed.language === "bilingual" ? "both" : deed.language === "english" ? "english" : "hindi");
   useEffect(() => () => draftAbort.current?.abort(), []);
 
@@ -130,8 +139,8 @@ export function useDeedWorkspace({ deed, initialData, initialDocuments, aiEnable
     window.open(result.url, "_blank", "noopener,noreferrer");
   };
 
-  const removeDocument = (doc: WorkspaceDocument) => {
-    if (!window.confirm("Delete " + doc.file_name + "? Details already extracted into the deed will remain.")) return;
+  const removeDocument = async (doc: WorkspaceDocument) => {
+    if (!(await confirmDialog({ title: "Delete this paper?", description: doc.file_name + " will be deleted. Details already read from it stay in the deed.", confirmLabel: "Delete", destructive: true }))) return;
     void guarded("Removing document…", async () => {
       const result = await deleteDocument({ id: doc.id });
       if (result.error) throw new Error(result.error);
@@ -144,10 +153,14 @@ export function useDeedWorkspace({ deed, initialData, initialDocuments, aiEnable
   /** Saved versions, fetched once; later versions are added as they are made. */
   async function fetchDrafts() {
     if (draftsLoaded.current) return drafts;
-    const result = await loadStandardDrafts(deed.id);
-    if (result.error) throw new Error(result.error);
+    setDraftsError("");
+    let result: Awaited<ReturnType<typeof loadStandardDrafts>>;
+    try { result = await loadStandardDrafts(deed.id); }
+    catch { result = { error: "Draft versions could not be loaded. Check your connection and retry.", drafts: [] }; }
+    if (result.error) { setDraftsError(result.error); throw new Error(result.error); }
     draftsLoaded.current = true;
     setDrafts(result.drafts);
+    setDraftsReady(true);
     return result.drafts;
   }
 
@@ -157,35 +170,42 @@ export function useDeedWorkspace({ deed, initialData, initialDocuments, aiEnable
     onDraftsReady?.();
   });
 
-  const generate = () => void guarded("Preparing your draft…", async () => {
-    const abort = new AbortController(); draftAbort.current = abort; setDraftStage("loading");
-    const toastId = toast.loading("Preparing draft", { description: "Loading your papers and instructions" });
-    try {
-      const result = await streamStandardDraft({ id: deed.id, language, instructions }, abort.signal, (stage, message) => {
-        setDraftStage(stage); setBusy(message); toast.loading("Preparing draft", { id: toastId, description: message });
-      });
-      setSavedInstructions(instructions);
-      // Keep the full version history: earlier versions plus the new ones.
-      const earlier = draftsLoaded.current ? drafts : await loadStandardDrafts(deed.id).then((loaded) => loaded.drafts.filter((item) => !result.drafts.some((made) => made.id === item.id))).catch(() => []);
-      draftsLoaded.current = true;
-      setDrafts([...result.drafts, ...earlier.filter((item) => !result.drafts.some((made) => made.id === item.id))]);
-      if (result.localized) acceptData({ ...dataRef.current, localized: result.localized });
-      setNotices(result.notes);
-      onDraftsReady?.();
-      toast.success(result.drafts.length > 1 ? "Drafts saved" : "Draft saved", { id: toastId, description: result.drafts.map((draft) => (draft.language === "hindi" ? "हिंदी" : "English") + " v" + draft.version).join(" · ") + " ready for your review.", duration: 4500 });
-    } catch (error) {
-      if (abort.signal.aborted) toast.info("Drafting stopped", { id: toastId, description: "Your papers and saved work remain. Check Draft if saving had already started.", duration: 5000 });
-      else { toast.error("Drafting did not finish", { id: toastId, description: error instanceof Error ? error.message : "Please retry.", duration: 7000 }); }
-    } finally { draftAbort.current = null; setDraftStage(""); }
-  });
+  const generate = async () => {
+    if (unsavedDraft.current && !(await confirmDialog({ title: "Prepare a new version?", description: "The open draft has edits that are not saved yet. They will not be part of the new version. Save a version first to keep them.", confirmLabel: "Prepare anyway" }))) return;
+    await guarded("Preparing your draft…", async () => {
+      const abort = new AbortController(); draftAbort.current = abort; setDraftStage("loading");
+      const toastId = toast.loading("Preparing draft", { description: "Loading your papers and instructions" });
+      try {
+        const result = await streamStandardDraft({ id: deed.id, language, instructions }, abort.signal, (stage, message) => {
+          setDraftStage(stage); setBusy(message); toast.loading("Preparing draft", { id: toastId, description: message });
+        });
+        setSavedInstructions(instructions);
+        // Keep the full version history: earlier versions plus the new ones.
+        const earlier = draftsLoaded.current ? drafts : await loadStandardDrafts(deed.id).then((loaded) => loaded.drafts.filter((item) => !result.drafts.some((made) => made.id === item.id))).catch(() => []);
+        draftsLoaded.current = true;
+        setDrafts([...result.drafts, ...earlier.filter((item) => !result.drafts.some((made) => made.id === item.id))]);
+        setDraftsReady(true);
+        setDraftsError("");
+        unsavedDraft.current = false;
+        setGeneration((count) => count + 1);
+        if (result.localized) acceptData({ ...dataRef.current, localized: result.localized });
+        setNotices(result.notes);
+        onDraftsReady?.();
+        toast.success(result.drafts.length > 1 ? "Drafts saved" : "Draft saved", { id: toastId, description: result.drafts.map((draft) => (draft.language === "hindi" ? "हिंदी" : "English") + " v" + draft.version).join(" · ") + " ready for your review.", duration: 4500 });
+      } catch (error) {
+        if (abort.signal.aborted) toast.info("Drafting stopped", { id: toastId, description: "Your papers and saved work remain. Check Draft if saving had already started.", duration: 5000 });
+        else { toast.error("Drafting did not finish", { id: toastId, description: error instanceof Error ? error.message : "Please retry.", duration: 7000 }); }
+      } finally { draftAbort.current = null; setDraftStage(""); }
+    });
+  };
 
   const saveTitle = () => {
     const next = title.trim();
-    if (next === savedTitle.current) return;
-    if (next.length < 3) { setTitle(savedTitle.current); toast.error("A deed title needs at least 3 characters."); return; }
+    if (next === savedTitle) return;
+    if (next.length < 3) { setTitle(savedTitle); toast.error("A deed title needs at least 3 characters."); return; }
     void updateDeedTitle({ id: deed.id, title: next }).then((result) => {
       if (result.error) { toast.error(result.error); return; }
-      savedTitle.current = next;
+      setSavedTitle(next);
     }).catch(() => toast.error("Title was not saved. Please retry."));
   };
 
@@ -197,9 +217,9 @@ export function useDeedWorkspace({ deed, initialData, initialDocuments, aiEnable
   });
 
   return {
-    data, dataRef, acceptData, documents, title, setTitle, saveTitle, instructions, setInstructions, savedInstructions, saveInstructions,
+    data, dataRef, acceptData, documents, title, setTitle, saveTitle, savedTitle, instructions, setInstructions, savedInstructions, saveInstructions,
     busy, guarded, notices, states, extracting, uploads, save, source, sourceLoading, showSource, extract, toggleModule, openDocument,
-    removeDocument, drafts, setDrafts, openDrafts, fetchDrafts, generate, draftStage, stopDrafting: () => draftAbort.current?.abort(), language, setLanguage,
+    removeDocument, drafts, setDrafts, draftsReady, draftsError, generation, unsavedDraft, markUnsaved, openDrafts, fetchDrafts, generate: () => void generate(), draftStage, stopDrafting: () => draftAbort.current?.abort(), language, setLanguage,
     disabled: Boolean(busy),
   };
 }

@@ -4,14 +4,6 @@ import { deedTypeIds } from "@/lib/deed-types";
 
 const deedType = z.enum(deedTypeIds);
 const deedLanguage = z.enum(["english", "hindi", "bilingual"]);
-const deedStatus = z.enum([
-  "draft",
-  "data_collection",
-  "under_review",
-  "generated",
-  "finalized",
-]);
-
 export const createDeedSchema = z.object({
   deedType,
   title: z.string().trim().min(3, "Enter a descriptive deed title.").max(180),
@@ -27,11 +19,6 @@ export const updateDeedTitleSchema = z.object({
   title: z.string().trim().min(3).max(180),
 });
 
-export const updateDeedStatusSchema = z.object({
-  id: z.string().uuid(),
-  status: deedStatus,
-});
-
 export const updateRemarksSchema = z.object({
   id: z.string().uuid(),
   remarks: z.string().trim().max(4000),
@@ -42,4 +29,3 @@ export const deleteDeedSchema = deedIdSchema.extend({
   referenceNo: z.string().trim().min(1),
 });
 
-export type CreateDeedInput = z.infer<typeof createDeedSchema>;

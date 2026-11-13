@@ -12,6 +12,7 @@ import { deedTypeIds, type DeedType } from "@/lib/deed-types";
 import { requireWorkspace } from "@/lib/workspace";
 import type { AiMemory } from "@/types/database";
 import { userMessage } from "@/lib/errors";
+import { logActivity } from "@/lib/activity.server";
 
 type Result<T = object> = { error: string } | ({ error?: undefined } & T);
 
@@ -137,7 +138,7 @@ async function storeReference(workspace: Awaited<ReturnType<typeof requireWorksp
     .select("*")
     .single();
   if (error || !data) return { error: error?.code === "42P01" || error?.code === "PGRST205" ? MIGRATION_HINT : (userMessage(error, "Could not save the reference.")) };
-  await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, user_id: workspace.user.id, action: "ai_saved_reference", details: { ...usageDetails(result.usage), deed_type: result.deedType, language: result.language } });
+  logActivity(workspace, { action: "ai_saved_reference", details: { ...usageDetails(result.usage), deed_type: result.deedType, language: result.language } });
   revalidatePath("/app/settings/ai");
   return { item: toItem(data as AiMemory) };
 }
@@ -185,7 +186,7 @@ export async function learnStyle(input: unknown): Promise<Result<{ suggestions: 
       temperature: 0.2,
       timeoutMs: 180_000,
     });
-    await workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, user_id: workspace.user.id, action: "ai_learned_style", details: { ...usageDetails(usage), deed_type: parsed.data.deedType } });
+    logActivity(workspace, { action: "ai_learned_style", details: { ...usageDetails(usage), deed_type: parsed.data.deedType } });
     const suggestions = (data.instructions ?? []).filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim().slice(0, 400)).slice(0, 15);
     return suggestions.length ? { suggestions } : { error: "No style instructions could be found." };
   } catch (error) {

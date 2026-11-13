@@ -115,7 +115,7 @@ function TourCard({ step, index, total, label, onSkip, onBack, onNext }: {
   return <dialog ref={dialog} aria-labelledby={id + "-title"} aria-describedby={id + "-text"} onCancel={(event) => { event.preventDefault(); onSkip(); }}
     className="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none overflow-hidden border-0 bg-transparent p-0 text-foreground backdrop:bg-transparent">
     {rect ? <div aria-hidden="true" className="pointer-events-none fixed rounded-xl border-2 border-white ring-2 ring-primary" style={{ ...rect, boxShadow: "0 0 0 9999px rgb(0 0 0 / 0.55)" }} /> : <div aria-hidden="true" className="fixed inset-0 bg-black/55" />}
-    <div ref={card} className="fixed left-1/2 max-h-[calc(100dvh_-_24px)] w-[calc(100%_-_24px)] max-w-sm -translate-x-1/2 overflow-auto rounded-2xl border border-border bg-card p-5 shadow-2xl sm:p-6" style={{ top: cardTop ?? 16 }}>
+    <div ref={card} className="fixed left-1/2 max-h-[calc(100dvh_-_24px)] w-[calc(100%_-_24px)] max-w-sm -translate-x-1/2 overflow-auto rounded-2xl border border-border bg-card p-5 shadow-2xl transition-[top] duration-200 sm:p-6" style={{ top: cardTop ?? 16 }}>
       <div className="flex items-center justify-between gap-3"><p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><button type="button" onClick={onSkip} aria-label="Skip tutorial" className="rounded-md p-1 text-muted-foreground hover:bg-secondary"><X className="size-4" /></button></div>
       <p className="mt-3 text-xs font-medium text-primary" aria-live="polite">Step {index + 1} of {total}</p>
       <h2 id={id + "-title"} className="mt-2 text-xl font-semibold tracking-tight">{step.title}</h2>
@@ -124,7 +124,7 @@ function TourCard({ step, index, total, label, onSkip, onBack, onNext }: {
       <div className="mt-5 flex items-center gap-3">
         <button type="button" onClick={onSkip} className="mr-auto text-xs text-muted-foreground hover:underline">Skip tutorial</button>
         <button type="button" onClick={onBack} disabled={!index} className="rounded-lg px-2 py-2 text-sm disabled:opacity-30">Back</button>
-        <button ref={next} type="button" onClick={onNext} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">{index === total - 1 ? "Got it" : "Next"}</button>
+        <button ref={next} type="button" onClick={onNext} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/85 active:translate-y-px">{index === total - 1 ? "Got it" : "Next"}</button>
       </div>
       <p className="mt-4 text-[10px] leading-4 text-muted-foreground">This guide never changes your deed. Your tutorial preference is saved to your account.</p>
     </div>

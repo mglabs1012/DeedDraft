@@ -8,9 +8,10 @@ import { conversionPrompt } from "@/lib/ai/prompts";
 import { saveDeedSection } from "@/lib/deed-sections.server";
 import { pendingConversions } from "@/lib/drafting/localize";
 import { convertOffline, isShortValue } from "@/lib/drafting/transliterate";
-import { keepsParticulars } from "@/lib/drafting/segments";
+import { keepsParticulars } from "@/lib/drafting/particulars";
 import { parseDeedData, type Localized } from "@/lib/schemas/deed-data";
 import { requireWorkspace } from "@/lib/workspace";
+import { logActivity } from "@/lib/activity.server";
 
 type Result<T = object> = { error: string } | ({ error?: undefined } & T);
 
@@ -88,7 +89,7 @@ export async function convertForDraft(input: unknown): Promise<Result<{ localize
           temperature: 0,
           timeoutMs: 90_000,
         });
-        void workspace.supabase.from("activity_log").insert({ firm_id: workspace.firm.id, deed_id: deed.id, user_id: workspace.user.id, action: "ai_converted_text", details: { ...usageDetails(usage), language, values: batch.length } }).then(() => undefined, () => undefined);
+        logActivity(workspace, { deed_id: deed.id, action: "ai_converted_text", details: { ...usageDetails(usage), language, values: batch.length } });
         return { batch, items: reply.items ?? [] };
       }));
       for (const result of results) {

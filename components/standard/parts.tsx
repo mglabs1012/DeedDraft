@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { setDeedMode } from "@/app/actions/standard";
 import { ModeBadge, type WorkspaceMode } from "@/components/mode-badge";
 import { Button } from "@/components/ui/button";
+import { confirmDialog } from "@/components/ui/confirm";
 import { textareaClass } from "@/components/ui/field";
 import { HelpTip } from "@/components/guided-tour";
 import { getDeedType } from "@/lib/deed-types";
@@ -21,16 +22,26 @@ import { UploadWindow } from "./upload-window";
 import type { DeedWorkspace, DraftLanguageChoice } from "./use-deed-workspace";
 
 /** Back link, editable title, deed type, mode badge and the switch to the other mode. */
-export function WorkspaceHeader({ w, deed, mode, canSwitch, children }: { w: DeedWorkspace; deed: Deed; mode: WorkspaceMode; canSwitch: boolean; children?: React.ReactNode }) {
+export function WorkspaceHeader({ w, deed, mode, canSwitch, place, children }: {
+  w: DeedWorkspace; deed: Deed; mode: WorkspaceMode; canSwitch: boolean;
+  /** Where the user is ("draft" or elsewhere), so the other mode opens at the same place. */
+  place: string; children?: React.ReactNode;
+}) {
   const router = useRouter();
   const [switching, startSwitch] = useTransition();
   const other: WorkspaceMode = mode === "premium" ? "standard" : "premium";
-  const switchMode = () => startSwitch(async () => {
-    const result = await setDeedMode({ id: deed.id, mode: other });
-    if (result.error !== undefined) return void toast.error(result.error);
-    toast.success(other === "premium" ? "Opened in Premium Mode" : "Opened in Standard Mode", { description: "All papers and details are kept." });
-    router.refresh();
-  });
+  const switchMode = async () => {
+    if (w.unsavedDraft.current && !(await confirmDialog({ title: "Switch to " + (other === "premium" ? "Premium" : "Standard") + " Mode?", description: "The open draft has edits that are not saved as a version. Switching now discards them.", confirmLabel: "Discard and switch", destructive: true }))) return;
+    startSwitch(async () => {
+      const result = await setDeedMode({ id: deed.id, mode: other });
+      if (result.error !== undefined) return void toast.error(result.error);
+      toast.success(other === "premium" ? "Opened in Premium Mode" : "Opened in Standard Mode", { description: "All papers, details and draft versions are kept." });
+      const target = "/app/deeds/" + deed.id + (place === "draft" ? "?tab=draft" : "");
+      // Same address: re-render on the server; otherwise navigate (which also re-renders).
+      if (window.location.pathname + window.location.search === target) router.refresh();
+      else router.replace(target, { scroll: false });
+    });
+  };
   return (
     <header>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
@@ -38,7 +49,7 @@ export function WorkspaceHeader({ w, deed, mode, canSwitch, children }: { w: Dee
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate">{getDeedType(deed.deed_type).label} · {deed.reference_no}</span>
           <ModeBadge mode={mode} />
-          {canSwitch ? <button data-tour="mode-switch" type="button" disabled={switching || w.disabled} onClick={switchMode} className="whitespace-nowrap rounded-md px-1.5 py-1 font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50">{switching ? "Switching…" : other === "premium" ? "Open in Premium" : "Open in Standard"}</button> : null}
+          {canSwitch ? <button data-tour="mode-switch" type="button" disabled={switching || w.disabled} onClick={() => void switchMode()} className="whitespace-nowrap rounded-md px-1.5 py-1 font-medium text-primary underline-offset-2 hover:underline disabled:opacity-50">{switching ? "Switching…" : other === "premium" ? "Open in Premium" : "Open in Standard"}</button> : null}
         </div>
       </div>
       <label className="mt-3 block"><span className="sr-only">Deed title</span><input aria-label="Deed title" className="w-full text-ellipsis rounded-md border border-transparent bg-transparent py-1 text-xl font-medium tracking-tight text-primary outline-none hover:border-border focus:border-primary sm:text-3xl" value={w.title} maxLength={180} onChange={(event) => w.setTitle(event.target.value)} onBlur={w.saveTitle} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>

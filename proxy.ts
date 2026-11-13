@@ -28,9 +28,9 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Verifies the session token (locally when the project uses asymmetric signing keys) and refreshes it when needed.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? data.claims : null;
 
   const pathname = request.nextUrl.pathname;
   const isAppRoute = pathname.startsWith("/app");
